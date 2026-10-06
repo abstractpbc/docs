@@ -1,0 +1,818 @@
+openapi: 3.1.0
+info:
+  title: Abstract API
+  version: 1.0.0
+  summary: Robot action models and LLMs behind one API key.
+  description: |
+    `POST /v1/chat/completions` serves the robot action models. `POST /v1/responses` and
+    `GET /v1/responses/{response_id}` serve the LLM models through the OpenAI Responses API.
+    `GET /v1/models` lists the LLM model ids.
+
+    The robot models also run over a WebSocket at `wss://api.abstract.inc/v1/responses`.
+    OpenAPI does not describe it. See [Sessions over WebSocket](/robots/sessions).
+  contact:
+    name: Abstract
+    url: https://abstract.inc
+servers:
+  - url: https://api.abstract.inc
+security:
+  - bearerAuth: []
+tags:
+  - name: Robot models
+  - name: LLM models
+
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [Robot models]
+      operationId: createActionChunk
+      summary: Create an action chunk
+      description: |
+        Turns one observation into one action chunk. The last user message carries the task
+        instruction as a text part and the camera frames as JPEG image parts, camera-major
+        and oldest first within a camera. `robot_state`, `session_id` and the controls are
+        top-level fields.
+
+        The action chunk comes back as a JSON string in `choices[0].message.content`.
+
+        With `stream: true` the answer is `text/event-stream`: `: processing` comments every
+        250 ms, one event with the whole chunk, one event with `finish_reason` and `usage`,
+        then `data: [DONE]`. A failure after the stream starts arrives as an event with an
+        `error` object and `finish_reason: "error"`; the HTTP status stays 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+            examples:
+              molmoact2:
+                summary: allenai/molmoact2:yam, one frame per camera
+                value:
+                  model: allenai/molmoact2:yam
+                  messages:
+                    - role: user
+                      content:
+                        - type: text
+                          text: put the red cup in the bin
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<top JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<left JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<right JPEG>' }
+                  robot_state:
+                    joint_position: [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0]
+                    gripper_position: [1.0, 0.5]
+              dreamzeroFirst:
+                summary: abstract/dreamzero-astra:yam, first request of a session
+                value:
+                  model: abstract/dreamzero-astra:yam
+                  session_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  messages:
+                    - role: user
+                      content:
+                        - type: text
+                          text: fold the towel
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<top JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<left JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<right JPEG>' }
+                  robot_state:
+                    joint_position: [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0]
+                    gripper_position: [1.0, 0.5]
+              dreamzeroNext:
+                summary: abstract/dreamzero-astra:yam, a later request (4 frames per camera)
+                value:
+                  model: abstract/dreamzero-astra:yam
+                  session_id: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  messages:
+                    - role: user
+                      content:
+                        - { type: text, text: fold the towel }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<top, oldest>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<top>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<top>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<top, latest>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<left, oldest>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<left>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<left>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<left, latest>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<right, oldest>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<right>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<right>' } }
+                        - { type: image_url, image_url: { url: 'data:image/jpeg;base64,<right, latest>' } }
+                  robot_state:
+                    joint_position: [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0]
+                    gripper_position: [1.0, 0.5]
+              rho:
+                summary: microsoft/rho:yam, Cartesian state
+                value:
+                  model: microsoft/rho:yam
+                  messages:
+                    - role: user
+                      content:
+                        - type: text
+                          text: put the red cup in the bin
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<scene JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<left_wrist JPEG>' }
+                        - type: image_url
+                          image_url: { url: 'data:image/jpeg;base64,<right_wrist JPEG>' }
+                  robot_state:
+                    joint_position: []
+                    gripper_position: [0.0, 0.0]
+                    cartesian_position: [0.3, 0.2, 0.3, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.3, -0.2, 0.3, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+      responses:
+        '200':
+          description: The action chunk, or a text description of the model for a request without images.
+          headers:
+            X-Generation-Id:
+              description: The id of this generation.
+              schema:
+                type: string
+            X-Session-Step:
+              description: The chunk's zero-based index in the session. Present when the request has a `session_id`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletion'
+              example:
+                id: gen-3f9a1c2b7d4e
+                object: chat.completion
+                created: 1790000000
+                model: allenai/molmoact2:yam
+                choices:
+                  - index: 0
+                    message:
+                      role: assistant
+                      content: '{"session_id":"anon-8c1d2e3f4a5b","step":0,"dt":0.03333333333333333,"action_dim":14,"action_space":"joint_position","actions":[[0.01,-0.39,0.61,0.0,0.2,0.0,1.0,0.0,-0.4,0.6,0.0,0.2,0.0,0.5]],"next_frames_per_camera":1,"timing_ms":{"decode":4.1,"queue":0.0,"prefill":0.0,"denoise":212.5,"encode":0.3}}'
+                    finish_reason: stop
+                usage:
+                  prompt_tokens: 650
+                  prompt_tokens_details: { cached_tokens: 0 }
+                  completion_tokens: 30
+                  total_tokens: 680
+            text/event-stream:
+              schema:
+                type: string
+                description: 'Server-sent events. Lines that start with `:` are comments. The stream ends with `data: [DONE]`.'
+              example: |
+                : processing
+
+                data: {"id":"gen-3f9a1c2b7d4e","object":"chat.completion.chunk","created":1790000000,"model":"allenai/molmoact2:yam","choices":[{"index":0,"delta":{"role":"assistant","content":"{\"session_id\":\"anon-8c1d2e3f4a5b\",\"step\":0,\"dt\":0.03333333333333333,\"action_dim\":14,\"action_space\":\"joint_position\",\"actions\":[[0.01,-0.39,0.61,0.0,0.2,0.0,1.0,0.0,-0.4,0.6,0.0,0.2,0.0,0.5]],\"next_frames_per_camera\":1,\"timing_ms\":{\"decode\":4.1,\"queue\":0.0,\"prefill\":0.0,\"denoise\":212.5,\"encode\":0.3}}"},"finish_reason":null}]}
+
+                data: {"id":"gen-3f9a1c2b7d4e","object":"chat.completion.chunk","created":1790000000,"model":"allenai/molmoact2:yam","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":650,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens":30,"total_tokens":680}}
+
+                data: [DONE]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/PaymentRequired'
+        '409':
+          description: '`session_busy`: another request for this `session_id` is still running.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: '`session_expired`: the session expired or its state is gone. Start a new session with a new `session_id` and 1 frame per camera.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`image_too_large` (an image over 262,144 bytes) or `request_too_large` (a body over 8 MiB).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: '`spend_limit_exceeded` (do not retry) or `no_replica_free` (retry after `Retry-After` seconds).'
+          headers:
+            Retry-After:
+              description: Seconds to wait before starting a new session. Sent with `no_replica_free`.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: '`model_failure`: the model failed before the answer started.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: '`engine_unavailable`: the model service is unreachable.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v1/responses:
+    post:
+      tags: [LLM models]
+      operationId: createResponse
+      summary: Create a response
+      description: |
+        The OpenAI Responses API for the LLM models. An `:async` model answers at once with a
+        `queued` or `in_progress` response; poll `GET /v1/responses/{response_id}` until it is
+        terminal. A `:superfast` model completes inline.
+
+        `stream: true` returns server-sent events: live on `:superfast` models, buffered on
+        `:async` models (keep-alives while the job runs, then the whole output).
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: 'The same POST with the same key returns the same response and never starts a second job. 1 to 200 characters from `A-Z a-z 0-9 _ . / : -`.'
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_./:-]{1,200}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResponseRequest'
+            examples:
+              async:
+                summary: Background job, then poll
+                value:
+                  model: glm-5.3:async
+                  input: Summarise RFC 8628 in three sentences.
+              superfast:
+                summary: Inline, streamed live
+                value:
+                  model: kimi-k3:superfast
+                  input: Write a haiku about a robot arm.
+                  stream: true
+      responses:
+        '200':
+          description: The response. On an `:async` model its `status` is `queued` or `in_progress`.
+          headers:
+            Idempotency-Key:
+              description: The key this request ran under. The API generates one when you send none.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+              example:
+                id: resp_abc123
+                object: response
+                created_at: 1790000000
+                status: queued
+                model: glm-5.3:async
+                output: []
+                usage: null
+            text/event-stream:
+              schema:
+                type: string
+                description: OpenAI Responses server-sent events.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '402':
+          $ref: '#/components/responses/PaymentRequired'
+        '409':
+          description: '`idempotency_conflict`, `idempotency_replay_terminal` or `submission_outcome_unknown`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`invalid_request`: the body is over 2 MiB.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request` (not a JSON object, unknown model, or an unsupported field) or `invalid_idempotency_key`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: '`spend_limit_exceeded`: the request would cross the monthly spend limit. Do not retry.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: '`invalid_upstream_response`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v1/responses/{response_id}:
+    get:
+      tags: [LLM models]
+      operationId: retrieveResponse
+      summary: Retrieve a response
+      description: Returns a response your account created. Poll it until `status` is `completed`, `failed`, `cancelled` or `incomplete`.
+      parameters:
+        - name: response_id
+          in: path
+          required: true
+          description: The `id` from the POST answer.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9_-]{1,200}$'
+      responses:
+        '200':
+          description: The response.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+              example:
+                id: resp_abc123
+                object: response
+                created_at: 1790000000
+                status: completed
+                model: glm-5.3:async
+                output:
+                  - type: message
+                    id: msg_abc123
+                    role: assistant
+                    status: completed
+                    content:
+                      - type: output_text
+                        text: RFC 8628 defines the OAuth 2.0 device authorization grant.
+                        annotations: []
+                usage:
+                  input_tokens: 14
+                  input_tokens_details: { cached_tokens: 0 }
+                  output_tokens: 96
+                  total_tokens: 110
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`not_found`: no response with this id belongs to your account.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_id`: the id breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: '`invalid_upstream_response`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+  /v1/models:
+    get:
+      tags: [LLM models]
+      operationId: listModels
+      summary: List LLM models
+      description: Lists the LLM model ids. The robot models are listed in [Robot models](/robots/models).
+      responses:
+        '200':
+          description: The LLM models.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelList'
+              example:
+                object: list
+                data:
+                  - id: glm-5.3:async
+                    object: model
+                    owned_by: abstract
+                    capabilities: { responses: true, background: true, streaming: true, streaming_mode: buffered }
+                  - id: glm-5.3:superfast
+                    object: model
+                    owned_by: abstract
+                    capabilities: { responses: true, background: false, streaming: true, streaming_mode: live }
+                  - id: deepseek-v4-flash:async
+                    object: model
+                    owned_by: abstract
+                    capabilities: { responses: true, background: true, streaming: true, streaming_mode: buffered }
+                  - id: deepseek-v4-flash:superfast
+                    object: model
+                    owned_by: abstract
+                    capabilities: { responses: true, background: false, streaming: true, streaming_mode: live }
+                  - id: kimi-k3:superfast
+                    object: model
+                    owned_by: abstract
+                    capabilities: { responses: true, background: false, streaming: true, streaming_mode: live }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Your Abstract API key. Get it with `abstract login`, pass it as `$(abstract token)`.
+
+  responses:
+    BadRequest:
+      description: The request breaks the model's contract. `code` names the problem, for example `image_count_mismatch`, `state_shape_mismatch`, `session_missing` or `handoff_unavailable`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              message: A new session needs 3 image parts (one per camera); got 12.
+              type: invalid_request_error
+              param: messages
+              code: image_count_mismatch
+    Unauthorized:
+      description: '`missing_api_key` or `invalid_api_key`.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              message: Invalid API key.
+              type: invalid_request_error
+              code: invalid_api_key
+    PaymentRequired:
+      description: '`payment_required`: the account has no payment method and no credit.'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: A dependency is down, for example `auth_unavailable`, `billing_unavailable`, `metering_unavailable` or `engine_unavailable`. Retry with backoff.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    ChatCompletionRequest:
+      type: object
+      required: [model, messages]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+          enum: [abstract/dreamzero-astra:yam, allenai/molmoact2:yam, microsoft/rho:yam]
+          description: A robot model id.
+        messages:
+          type: array
+          minItems: 1
+          description: The server reads the last user message only. Its text parts are the task instruction; its image parts are the camera frames.
+          items:
+            $ref: '#/components/schemas/Message'
+        robot_state:
+          description: The robot's state at the time of the latest frame. Required with image parts. The model picks the shape.
+          oneOf:
+            - $ref: '#/components/schemas/YamJointState'
+            - $ref: '#/components/schemas/RhoCartesianState'
+        session_id:
+          type: string
+          maxLength: 128
+          description: The episode id you choose. Required with image parts on `abstract/dreamzero-astra:yam`; optional on the others. A new value starts a new episode.
+        stream:
+          type: boolean
+          default: false
+          description: '`true` returns server-sent events.'
+        action_horizon:
+          type: integer
+          minimum: 1
+          maximum: 30
+          description: Action rows to return, up to the model's rows per chunk (24, 30 or 25). Default all rows. The model still computes and bills the whole chunk.
+        num_inference_steps:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: Accepted for compatibility. No served model reads it.
+        handoff:
+          type: boolean
+          default: false
+          description: '`true` is refused with `handoff_unavailable` until an operator can take over. Send `false` or omit it.'
+
+    YamJointState:
+      type: object
+      title: YAM joint state
+      description: '`abstract/dreamzero-astra:yam` and `allenai/molmoact2:yam`.'
+      required: [joint_position, gripper_position]
+      properties:
+        joint_position:
+          type: array
+          items: { type: number }
+          minItems: 12
+          maxItems: 12
+          description: Left joints 1-6, then right joints 1-6, in radians.
+        gripper_position:
+          type: array
+          items: { type: number, minimum: 0, maximum: 1 }
+          minItems: 2
+          maxItems: 2
+          description: Left, then right. 0 is closed, 1 is open.
+
+    RhoCartesianState:
+      type: object
+      title: Rho Cartesian state
+      description: '`microsoft/rho:yam`. Cartesian poses, not joint angles.'
+      required: [joint_position, gripper_position, cartesian_position]
+      properties:
+        joint_position:
+          type: array
+          items: { type: number }
+          maxItems: 0
+          description: Always `[]`.
+        gripper_position:
+          type: array
+          items: { type: number }
+          minItems: 2
+          maxItems: 2
+          description: Left, then right, in the checkpoint's native gripper units.
+        cartesian_position:
+          type: array
+          items: { type: number }
+          minItems: 18
+          maxItems: 18
+          description: Left xyz (metres) and rotation6d, then right xyz and rotation6d. A rotation6d is the first two columns of the rotation matrix.
+
+    Message:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: '#/components/schemas/ContentPart'
+
+    ContentPart:
+      oneOf:
+        - $ref: '#/components/schemas/TextPart'
+        - $ref: '#/components/schemas/ImagePart'
+
+    TextPart:
+      type: object
+      title: Text part
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: text
+        text:
+          type: string
+          description: The task instruction. Keep it the same for the whole session.
+
+    ImagePart:
+      type: object
+      title: Image part
+      required: [type, image_url]
+      properties:
+        type:
+          type: string
+          const: image_url
+        image_url:
+          type: object
+          required: [url]
+          properties:
+            url:
+              type: string
+              description: '`data:image/jpeg;base64,` and the JPEG, at most 262,144 bytes before encoding.'
+
+    ChatCompletion:
+      type: object
+      required: [id, object, created, model, choices, usage]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: chat.completion
+        created:
+          type: integer
+          description: Unix seconds.
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              message:
+                type: object
+                properties:
+                  role:
+                    type: string
+                    const: assistant
+                  content:
+                    type: string
+                    description: The action chunk as a JSON string (see ActionChunk), or a text description for a request without images.
+              finish_reason:
+                type: string
+                enum: [stop, error]
+        usage:
+          $ref: '#/components/schemas/ChunkUsage'
+
+    ActionChunk:
+      type: object
+      description: The JSON inside `choices[0].message.content`.
+      required: [session_id, step, dt, action_dim, action_space, actions, next_frames_per_camera, timing_ms]
+      properties:
+        session_id:
+          type: string
+        step:
+          type: integer
+          description: Zero-based chunk index in the session.
+        dt:
+          type: number
+          description: Seconds between consecutive action rows.
+        action_dim:
+          type: integer
+          description: Values per action row.
+        action_space:
+          type: string
+          enum: [joint_position, ee_6d_position]
+        actions:
+          type: array
+          items:
+            type: array
+            items: { type: number }
+        next_frames_per_camera:
+          type: integer
+          description: Frames per camera the next request of this session needs.
+        timing_ms:
+          type: object
+          properties:
+            decode: { type: number }
+            queue: { type: number }
+            prefill: { type: number }
+            denoise: { type: number }
+            encode: { type: number }
+        cache:
+          type: object
+          description: Present when the model reports its denoiser step cache.
+        context:
+          type: object
+          description: Present when the model reports its attention context.
+
+    ChunkUsage:
+      type: object
+      required: [prompt_tokens, completion_tokens, total_tokens]
+      properties:
+        prompt_tokens:
+          type: integer
+          description: Model prompt tokens for the chunk, cached ones included.
+        prompt_tokens_details:
+          type: object
+          properties:
+            cached_tokens:
+              type: integer
+              description: The part of `prompt_tokens` reused from earlier chunks of the episode.
+        completion_tokens:
+          type: integer
+          description: Action rows the model computed, before any `action_horizon` cut.
+        total_tokens:
+          type: integer
+
+    ResponseRequest:
+      type: object
+      required: [model]
+      additionalProperties: true
+      properties:
+        model:
+          type: string
+          enum: [glm-5.3:async, deepseek-v4-flash:async, glm-5.3:superfast, deepseek-v4-flash:superfast, kimi-k3:superfast]
+        input:
+          description: The OpenAI Responses `input`.
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+        stream:
+          type: boolean
+          default: false
+        max_output_tokens:
+          type: integer
+          minimum: 1
+          maximum: 65536
+          description: Default 8,192 on `glm-5.3:superfast` and 4,096 on the others.
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Response:
+      type: object
+      required: [id, status, model]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: response
+        created_at:
+          type: integer
+        status:
+          type: string
+          enum: [queued, in_progress, completed, failed, cancelled, incomplete]
+        model:
+          type: string
+          description: The public model id you sent.
+        output:
+          type: array
+          items:
+            type: object
+        usage:
+          oneOf:
+            - $ref: '#/components/schemas/ResponseUsage'
+            - type: 'null'
+
+    ResponseUsage:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+        input_tokens_details:
+          type: object
+          properties:
+            cached_tokens:
+              type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+
+    ModelList:
+      type: object
+      required: [object, data]
+      properties:
+        object:
+          type: string
+          const: list
+        data:
+          type: array
+          items:
+            type: object
+            required: [id, object, owned_by, capabilities]
+            properties:
+              id:
+                type: string
+              object:
+                type: string
+                const: model
+              owned_by:
+                type: string
+              capabilities:
+                type: object
+                properties:
+                  responses: { type: boolean }
+                  background: { type: boolean }
+                  streaming: { type: boolean }
+                  streaming_mode:
+                    type: string
+                    enum: [buffered, live]
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message, type, code]
+          properties:
+            message:
+              type: string
+              description: For people. It can change.
+            type:
+              type: string
+            param:
+              type: [string, 'null']
+              description: The request field at fault, when one is.
+            code:
+              type: string
+              description: Branch on this. See [Errors and limits](/errors).

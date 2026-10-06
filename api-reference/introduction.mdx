@@ -1,0 +1,28 @@
+---
+title: "API reference"
+description: "The HTTP endpoints of api.abstract.inc."
+---
+
+| Item | Value |
+| --- | --- |
+| Base URL | `https://api.abstract.inc` |
+| Authentication | `Authorization: Bearer` with your API key, on every endpoint |
+| Request and answer bodies | JSON, or server-sent events when `stream` is `true` |
+
+| Endpoint | Serves |
+| --- | --- |
+| `POST /v1/chat/completions` | Robot models: one observation in, one action chunk out |
+| `POST /v1/responses` | LLM models: the OpenAI Responses API |
+| `GET /v1/responses/{response_id}` | LLM models: retrieve a response your account created |
+| `GET /v1/models` | The LLM model ids |
+
+The WebSocket at `wss://api.abstract.inc/v1/responses` is on [Sessions over WebSocket](/robots/sessions).
+
+These pages describe each request. They do not send requests.
+Run requests from your own machine, with the key in your program's environment:
+
+```sh
+curl -s https://api.abstract.inc/v1/models -H "Authorization: Bearer $(abstract token)"
+```
+
+Every error has the same body. See [Errors and limits](/errors).

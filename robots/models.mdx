@@ -1,0 +1,137 @@
+---
+title: "Robot models"
+description: "Cameras, frames, state, and action shapes for each served robot model."
+---
+
+Every served robot model drives a bimanual YAM.
+Each model expects its own cameras, state, and frame counts.
+Build every request from the table of the model you call.
+
+Rules for every model:
+
+- Send frames as JPEG, camera-major: every frame of the first camera, then every frame of the next camera.
+- Within one camera, send frames oldest first. The last frame is the latest.
+- Send `robot_state` as the state at the time of the latest frame.
+- Action row `k` is meant for time `t + k * dt`, where `t` is when you captured the latest frame.
+- A model that is not stateful takes one frame per camera on every request.
+- A stateful model keeps the episode on the server. It takes one frame per camera on the first request of a session, then more on every later request.
+
+The WebSocket's `session.opened` message states the same facts at run time.
+See [Sessions over WebSocket](/robots/sessions).
+
+<Warning>
+A chunk with the right shape is not proof of task success or safe motion.
+Check every action against your robot's limits before you execute it.
+</Warning>
+
+## abstract/dreamzero-astra:yam
+
+A DreamZero world action model fine-tuned for the bimanual YAM.
+It keeps the episode's context on the server and conditions on recent video.
+
+| Fact | Value |
+| --- | --- |
+| Model id | `abstract/dreamzero-astra:yam` |
+| Cameras, in order | `top`, `left`, `right` |
+| Image size | 640x360 JPEG. The server resizes other sizes to 640x360. |
+| Frames per camera, first request | 1 |
+| Frames per camera, later requests | 4 |
+| `joint_position` | 12 numbers: left joints 1-6, then right joints 1-6, in radians. |
+| `gripper_position` | 2 numbers: left, then right. 0 is closed, 1 is open. |
+| `cartesian_position` | Not accepted |
+| Action rows per chunk | 24 |
+| Values per action row | 14: left joints 1-6, left gripper, right joints 1-6, right gripper. Joints are absolute positions in radians. |
+| Action space | `joint_position` |
+| Control rate | 30 Hz (`dt` = 1/30 s) |
+| Stateful | Yes |
+| `session_id` | Required |
+
+```json robot_state
+{
+  "joint_position": [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0],
+  "gripper_position": [1.0, 0.5]
+}
+```
+
+## allenai/molmoact2:yam
+
+Ai2's MolmoAct2 for the bimanual YAM.
+It reads one frame per camera and keeps no state between requests.
+
+| Fact | Value |
+| --- | --- |
+| Model id | `allenai/molmoact2:yam` |
+| Cameras, in order | `top`, `left`, `right` |
+| Image size | 640x360 JPEG. The server resizes other sizes to 640x360. |
+| Frames per camera, first request | 1 |
+| Frames per camera, later requests | 1 |
+| `joint_position` | 12 numbers: left joints 1-6, then right joints 1-6, in radians. |
+| `gripper_position` | 2 numbers: left, then right. 0 is closed, 1 is open. |
+| `cartesian_position` | Not accepted |
+| Action rows per chunk | 30 |
+| Values per action row | 14: left joints 1-6, left gripper, right joints 1-6, right gripper. Joints are absolute positions in radians. |
+| Action space | `joint_position` |
+| Control rate | 30 Hz (`dt` = 1/30 s) |
+| Stateful | No |
+| `session_id` | Optional |
+
+```json robot_state
+{
+  "joint_position": [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0],
+  "gripper_position": [1.0, 0.5]
+}
+```
+
+## microsoft/rho:yam
+
+Microsoft's Rho-YAM-Box.
+It predicts Cartesian end-effector targets, not joint commands.
+Abstract performs no inverse kinematics.
+
+| Fact | Value |
+| --- | --- |
+| Model id | `microsoft/rho:yam` |
+| Cameras, in order | `scene`, `left_wrist`, `right_wrist` |
+| Image size | Any size JPEG. The model keeps the aspect ratio and pads, so do not crop or stretch frames. |
+| Frames per camera, first request | 1 |
+| Frames per camera, later requests | 1 |
+| `joint_position` | 0 numbers: send `[]`. |
+| `gripper_position` | 2 numbers: left, then right, in the checkpoint's native gripper units. These are not MolmoAct2's 0 to 1 units. |
+| `cartesian_position` | 18 numbers, required: left xyz and left rotation6d, then right xyz and right rotation6d. |
+| Action rows per chunk | 25 |
+| Values per action row | 20: left xyz, left rotation6d, left gripper, then right xyz, right rotation6d, right gripper. |
+| Action space | `ee_6d_position` |
+| Control rate | 15 Hz (`dt` = 1/15 s) |
+| Stateful | No |
+| `session_id` | Optional |
+
+Positions are in metres, in the checkpoint's coordinate frame.
+A rotation6d is the first two columns of the rotation matrix, concatenated.
+The two columns must be nonzero and not parallel.
+The model computes 50 rows and returns the first 25.
+
+```json robot_state
+{
+  "joint_position": [],
+  "gripper_position": [0.0, 0.0],
+  "cartesian_position": [
+    0.3, 0.2, 0.3, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+    0.3, -0.2, 0.3, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0
+  ]
+}
+```
+
+## What the server checks
+
+| Check | Error code |
+| --- | --- |
+| Frame count per camera does not match the table | `image_count_mismatch` |
+| A state array has the wrong length, or a value is not a finite number | `state_shape_mismatch` |
+| `cartesian_position` is missing on `microsoft/rho:yam`, or present on another model | `state_shape_mismatch` |
+| A gripper value is outside 0 to 1 on `abstract/dreamzero-astra:yam` or `allenai/molmoact2:yam` | `invalid_image` |
+| A rotation6d is degenerate on `microsoft/rho:yam` | `invalid_image` |
+| A frame is not a decodable JPEG, or has an edge over 4096 pixels | `invalid_image` |
+
+`invalid_image` covers any frame or state value the model cannot use.
+Its message names the problem.
+See [Errors and limits](/errors) for every code.

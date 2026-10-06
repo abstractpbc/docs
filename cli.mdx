@@ -1,0 +1,102 @@
+---
+title: "CLI reference"
+description: "The abstract command: install, sign in, print the key, and set up an agent."
+---
+
+The `abstract` command signs you in and saves an API key on your machine, so a script or an agent can call the API.
+
+## Install
+
+```sh
+curl -fsSL https://abstract.inc/install.sh | bash
+```
+
+The installer supports macOS and Linux on arm64 and x64.
+It downloads the binary for your machine, checks its SHA-256 against the release's `checksums.txt`, and puts it in `~/.local/bin`.
+On Alpine, install `libstdc++` and `libgcc` first.
+
+| Variable | Effect |
+| --- | --- |
+| `ABSTRACT_INSTALL_DIR` | Installs into another directory. |
+| `ABSTRACT_VERSION` | Installs one release, for example `0.1.0`. |
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `abstract login` | Signs in through a browser and saves an API key on this machine. |
+| `abstract token` | Prints the saved API key and nothing else, for a script or an agent. |
+| `abstract status` | Shows the saved key's safe prefix and checks the key against the API. |
+| `abstract logout` | Revokes the saved key on the account and signs out. |
+| `abstract logout --local` | Removes the saved key from this machine only. The key stays active. |
+| `abstract skill` | Prints the skill that teaches an agent the Abstract API. |
+| `abstract skill install` | Saves that skill where your agents read skills. |
+| `abstract --help` | Prints the usage text. |
+| `abstract --version` | Prints the version. |
+
+### abstract login
+
+The command prints a link and a code.
+Open the link in a browser, sign in, and confirm the code.
+The CLI then creates a key named `abstract-cli@<hostname>` and saves it.
+A machine that is already signed in keeps its key, so an agent can run `abstract login` without checking first.
+
+The account needs a payment method or credit before the CLI can create a key.
+Set one up at [abstract.inc/start?setup=billing](https://abstract.inc/start?setup=billing).
+
+### abstract token
+
+Use it inside a command, and never print its output:
+
+```sh
+curl -s https://api.abstract.inc/v1/models -H "Authorization: Bearer $(abstract token)"
+ABSTRACT_API_KEY="$(abstract token)" python your_program.py
+```
+
+### abstract status
+
+The command calls `GET /v1/models` with the saved key.
+If the API answers 401, it tells you to run `abstract logout --local`, then `abstract login`.
+
+### abstract skill install
+
+The command saves the skill for every agent it finds in your home directory:
+
+| Agent | Directory |
+| --- | --- |
+| Claude Code | `~/.claude/skills/abstract` |
+| Codex | `~/.codex/skills/abstract` |
+| Cursor | `~/.cursor/skills/abstract` |
+| OpenCode | `~/.config/opencode/skills/abstract` |
+| Gemini CLI | `~/.gemini/skills/abstract` |
+| GitHub Copilot | `~/.copilot/skills/abstract` |
+| Shared | `~/.agents/skills/abstract` |
+
+An agent that is already running may need a new session to load the skill.
+
+## Files
+
+| Path | Content |
+| --- | --- |
+| `~/.config/abstract/credentials.json` | The saved key, readable by you alone. |
+
+`ABSTRACT_CONFIG_DIR` names another directory for this file.
+Without it, a set `XDG_CONFIG_HOME` moves the file to `$XDG_CONFIG_HOME/abstract/credentials.json`.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Success. |
+| 1 | An error you can fix. The command prints one line that says what went wrong. |
+| 2 | A usage error. The command prints the usage text. |
+
+## Set up an agent
+
+Paste this into an agent with a terminal, such as Claude Code, Codex, Cursor or OpenCode:
+
+> Set up Abstract for me. Run `curl -fsSL https://abstract.inc/install.sh | bash`, then
+> `abstract login`, and show me the link and code it prints. After I confirm, run
+> `abstract status`. Use `$(abstract token)` as the API key and never print it. Then run
+> `abstract skill install`, read the skill it installs, and follow it for every call to
+> the Abstract API.

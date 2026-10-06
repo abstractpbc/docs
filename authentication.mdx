@@ -1,0 +1,81 @@
+---
+title: "Authentication and keys"
+description: "Get an API key with the abstract CLI, pass it without showing it, and handle 401."
+---
+
+Every call to `https://api.abstract.inc/v1` carries an API key as a Bearer token:
+
+```http
+Authorization: Bearer <your API key>
+```
+
+The same header authenticates the WebSocket handshake at `/v1/responses`.
+`GET /v1/models` needs the key too.
+
+## Get a key
+
+The `abstract` CLI signs you in and saves a key on your machine.
+
+```sh
+curl -fsSL https://abstract.inc/install.sh | bash
+abstract login
+```
+
+`abstract login` prints a link and a code.
+Open the link in a browser and confirm the code.
+The CLI then creates a key on your account and saves it in `~/.config/abstract/credentials.json`, readable by you alone.
+A machine that is already signed in keeps its key.
+
+The account needs a payment method or credit before the CLI can create a key.
+Set one up at [abstract.inc/start?setup=billing](https://abstract.inc/start?setup=billing).
+
+## Use the key
+
+`abstract token` prints the saved key and nothing else.
+Pass it inside a command as `$(abstract token)`:
+
+```sh
+curl -s https://api.abstract.inc/v1/models \
+  -H "Authorization: Bearer $(abstract token)"
+```
+
+For a program, set the key in that program's environment only:
+
+```sh
+ABSTRACT_API_KEY="$(abstract token)" python your_program.py
+```
+
+The program reads `ABSTRACT_API_KEY` and sends it as the Bearer token.
+
+<Warning>
+Never print the key, echo it, commit it, or write it into a log or a chat.
+Treat anything that prints `abstract token` output as a secret.
+</Warning>
+
+## Check the key
+
+```sh
+abstract status
+```
+
+`abstract status` shows the saved key's safe prefix and calls `GET /v1/models` with it.
+
+## Handle 401
+
+The API answers HTTP 401 when the key is missing, wrong, or revoked.
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| `missing_api_key` | The request has no `Authorization: Bearer` header. | Send the header. |
+| `invalid_api_key` | The API does not know the key, or the key is revoked. | Run `abstract status`. If it reports HTTP 401, run `abstract logout --local`, then `abstract login`. |
+
+Do not retry a 401 with the same key.
+
+## Revoke a key
+
+| Command | Effect |
+| --- | --- |
+| `abstract logout` | Revokes the saved key on the account, then removes it from this machine. |
+| `abstract logout --local` | Removes the saved key from this machine only. The key stays active on the account. |
+
+See the [CLI reference](/cli) for every command.

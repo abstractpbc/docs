@@ -1,0 +1,48 @@
+---
+title: "Usage and billing units"
+description: "What a robot chunk is billed from: prompt tokens, cached tokens, and actions."
+---
+
+Every action chunk carries a `usage` object.
+The chunk is billed from that object, at the rates on [abstract.inc/pricing](https://abstract.inc/pricing).
+
+```json
+{
+  "prompt_tokens": 650,
+  "prompt_tokens_details": { "cached_tokens": 0 },
+  "completion_tokens": 30,
+  "total_tokens": 680
+}
+```
+
+## Units
+
+| Unit on /pricing | Field | Meaning |
+| --- | --- | --- |
+| Input, per 1M tokens | `prompt_tokens` minus `cached_tokens` | Model tokens the chunk encoded afresh, from its frames and its instruction. |
+| Cached input, per 1M tokens | `prompt_tokens_details.cached_tokens` | Model tokens the chunk reused from earlier chunks of the same episode. |
+| Output, per 1M actions | `completion_tokens` | Action rows the model computed. |
+
+`completion_tokens` counts the whole chunk the model computed.
+A smaller `action_horizon` returns fewer rows but does not lower `completion_tokens`.
+
+| Model | `completion_tokens` per chunk | `cached_tokens` |
+| --- | --- | --- |
+| `abstract/dreamzero-astra:yam` | 24 | The part of the episode's attention window reused from earlier chunks |
+| `allenai/molmoact2:yam` | 30 | 0 |
+| `microsoft/rho:yam` | 25 | 0 |
+
+Read `usage` from each answer. Do not compute it yourself.
+A JPEG count is not a token count.
+
+## How a chunk is metered
+
+1. Before the model runs, the API reserves the chunk's maximum cost against your monthly spend limit.
+2. If that reservation would cross the limit, the API refuses the request with HTTP 429 `spend_limit_exceeded`. The model does not run.
+3. When the answer arrives, the API settles the chunk from its `usage`, at the rates fixed when the request was submitted.
+4. A chunk the model never delivered settles at zero. This covers errors, mid-stream failures, and closed sockets.
+
+On the WebSocket, each observation is metered as one chunk.
+A request without images returns zero `usage`.
+
+Metered cost is enforced against your hard monthly spend limit.

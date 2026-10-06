@@ -1,0 +1,21 @@
+---
+title: "Handoff"
+description: "The optional handoff flag, and why true is refused today."
+---
+
+`handoff` is an optional boolean.
+It goes at the top level of a `POST /v1/chat/completions` body, and in the WebSocket's `session.open` message.
+
+| Value | Effect |
+| --- | --- |
+| `false`, or absent | The model runs alone. |
+| `true` | Refused today. It will let a human operator behind the API take over when a model fails a task. |
+
+The API refuses `true` instead of ignoring it:
+
+| Transport | Refusal |
+| --- | --- |
+| `POST /v1/chat/completions` | HTTP 400 with code `handoff_unavailable` |
+| WebSocket `session.open` | An `error` message with code `handoff_unavailable` and `closing: false`. Send `session.open` again on the same socket without `handoff`. |
+
+A value that is not a boolean returns `invalid_parameter`.

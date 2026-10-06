@@ -1,0 +1,67 @@
+---
+title: "Introduction"
+description: "One API for robot action models and LLMs."
+---
+
+Abstract serves models over HTTPS at `https://api.abstract.inc/v1`.
+One API key works for every model.
+You send the key as a Bearer token.
+
+| Family | Model ids | How you call them |
+| --- | --- | --- |
+| Robot action models for a bimanual YAM | `abstract/dreamzero-astra:yam`, `allenai/molmoact2:yam`, `microsoft/rho:yam` | `POST /v1/chat/completions`, or a WebSocket at `/v1/responses` |
+| LLMs | `glm-5.3:async`, `deepseek-v4-flash:async`, `glm-5.3:superfast`, `deepseek-v4-flash:superfast`, `kimi-k3:superfast` | `POST /v1/responses`, the OpenAI Responses API |
+
+## Robot action models
+
+A robot model turns one observation into one chunk of actions.
+An observation is the task as text, recent JPEG frames from each camera, and the robot's state.
+A chunk is a list of action rows.
+The robot executes the rows in order, at the model's control rate.
+
+A robot model id has the form `origin/model:embodiment`.
+`origin` names who made the weights.
+`model` names the weights.
+`embodiment` names the robot they drive.
+Every served robot model drives a bimanual YAM: two YAM arms, one scene camera, and one camera on each wrist.
+
+<Warning>
+Abstract returns numbers. It does not move your robot.
+Check every action against your robot's limits before you execute it.
+</Warning>
+
+## LLMs
+
+An LLM model id has the form `family-version:profile`.
+The part before the colon names the weights.
+The part after the colon names the API contract.
+
+| Profile | Contract |
+| --- | --- |
+| `:async` | The request runs in the background. You poll for the result. |
+| `:superfast` | The request completes inline. Streaming is live. |
+
+## Accounts and spend
+
+Every account has a hard monthly spend limit.
+Each request reserves its maximum cost against that limit before it runs.
+The request then settles from the usage its answer reports.
+A request that would cross the limit is refused with `spend_limit_exceeded`.
+API keys work for inference only after the account has a payment method or credit.
+
+Do not send sensitive data until retention controls and their defaults are documented.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Sign in, then make a first robot call and a first LLM call.
+  </Card>
+  <Card title="Robot models" icon="robot" href="/robots/models">
+    Cameras, state, and action shapes for each model.
+  </Card>
+  <Card title="Responses API" icon="message" href="/llm/responses">
+    Call the LLM models with the OpenAI SDK.
+  </Card>
+  <Card title="Errors and limits" icon="triangle-exclamation" href="/errors">
+    Every error code and what to do about it.
+  </Card>
+</CardGroup>

@@ -1,0 +1,218 @@
+---
+title: "Sessions over WebSocket"
+description: "One socket runs one episode: frames and observations go up, action chunks come back."
+---
+
+The WebSocket at `/v1/responses` runs one episode per socket.
+It reaches the same models and the same sessions as [chat completions](/robots/chat-completions).
+The API checks your key and payment once, at the handshake.
+
+## Connect
+
+```text
+wss://api.abstract.inc/v1/responses?model=<URL-encoded model id>
+```
+
+| Part | Value |
+| --- | --- |
+| `model` query parameter | The robot model id, URL-encoded. For example `allenai%2Fmolmoact2%3Ayam`. Always set it. |
+| `Authorization` header | `Bearer` and your API key, as on every HTTP call. |
+| Subprotocol | `abstract.responses.v1`. Optional. The server accepts it when you offer it. |
+
+The `model` in `session.open` must equal the `model` query parameter.
+
+The API refuses a handshake with an HTTP status and the usual JSON error body:
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| 401 | `missing_api_key`, `invalid_api_key` | The key is missing, wrong, or revoked. |
+| 402 | `payment_required` | The account has no payment method and no credit. |
+| 400 | `model_not_found` | The `model` query parameter names no served robot model. |
+| 502, 503 | `auth_unavailable`, `billing_unavailable`, `metering_unavailable`, `engine_unavailable` | A dependency is down. Retry with backoff. |
+
+## Messages
+
+You send text messages as JSON, and frames as binary messages.
+
+| You send | Shape | The server answers |
+| --- | --- | --- |
+| Open | `{"type":"session.open","model":"...","instruction":"...","session_id":"optional"}` | `session.opened` |
+| Frame | Binary: one byte with the camera index, then the JPEG bytes | Nothing |
+| Observation | `{"type":"observation","robot_state":{...}}` | `actions` |
+| Close | `{"type":"session.close"}` | `session.closed`, then close code 1000 |
+
+`session.open` also takes `handoff`, as in [Handoff](/robots/handoff).
+`observation` also takes `action_horizon` and `num_inference_steps`, as on chat completions.
+A text message is at most 65,536 characters.
+
+### session.opened
+
+The server states the model's contract.
+Build every later message from this reply.
+
+```json
+{
+  "type": "session.opened",
+  "session_id": "ws-5a1b2c3d4e5f",
+  "model": "abstract/dreamzero-astra:yam",
+  "cameras": ["top", "left", "right"],
+  "frames_per_camera_first": 1,
+  "frames_per_camera_next": 4,
+  "stateful": true,
+  "action_horizon": 24,
+  "action_dim": 14,
+  "action_space": "joint_position",
+  "dt": 0.03333333333333333,
+  "robot_state": { "joint_dim": 12, "gripper_dim": 2, "cartesian_dim": null }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | Your `session_id`, or a generated one when you sent none. |
+| `cameras` | Camera names. A camera's index is its position in this list. |
+| `frames_per_camera_first` | Frames per camera before the first observation. |
+| `frames_per_camera_next` | Frames per camera before every later observation. |
+| `stateful` | Whether the model keeps the episode's context on the server. |
+| `action_horizon`, `action_dim`, `action_space`, `dt` | The chunk shape, as in [Robot models](/robots/models). |
+| `robot_state` | Lengths of `joint_position`, `gripper_position` and `cartesian_position`. `cartesian_required` is `true` when the model needs `cartesian_position`. |
+
+### Frames
+
+A frame message is binary.
+Its first byte is the camera index: 0 for the first camera in `cameras`, 1 for the second, 2 for the third.
+The remaining bytes are one JPEG, at most 262,144 bytes.
+
+- Before the first observation, send `frames_per_camera_first` frames per camera.
+- Before every later observation, send `frames_per_camera_next` frames per camera.
+- Within one camera, send frames oldest first.
+
+### actions
+
+The answer to an observation carries the same action chunk as a chat completion, plus `type`, `id` and `usage`:
+
+```json
+{
+  "type": "actions",
+  "id": "gen-7e8f9a0b1c2d",
+  "session_id": "ws-5a1b2c3d4e5f",
+  "step": 0,
+  "dt": 0.03333333333333333,
+  "action_dim": 14,
+  "action_space": "joint_position",
+  "actions": [[0.01, -0.39, 0.61, 0.0, 0.2, 0.0, 1.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.5]],
+  "next_frames_per_camera": 4,
+  "timing_ms": { "decode": 3.2, "queue": 0.0, "prefill": 0.0, "denoise": 2600.0, "encode": 0.4 },
+  "usage": {
+    "prompt_tokens": 880,
+    "prompt_tokens_details": { "cached_tokens": 0 },
+    "completion_tokens": 24,
+    "total_tokens": 904
+  }
+}
+```
+
+The example shows one action row and example numbers. A real answer holds `action_horizon` rows.
+An `abstract/dreamzero-astra:yam` answer also carries `cache` and `context`, as on [chat completions](/robots/chat-completions#answer).
+Send the next observation after the previous `actions` or `error` arrives.
+
+### session.closed
+
+`{"type":"session.closed","session_id":"...","steps":3}`.
+`steps` counts the chunks the session produced.
+The server then closes the socket with code 1000.
+
+## Errors
+
+An error arrives as a text message:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "message": "Step 1 needs 4 frame(s) per camera (top, left, right); got [4, 4, 3].",
+    "type": "invalid_request_error",
+    "param": "frame",
+    "code": "image_count_mismatch"
+  },
+  "closing": false
+}
+```
+
+| `closing` | Meaning | What to do |
+| --- | --- | --- |
+| `false` | The session is where it was. The server dropped the frames you sent since the last observation. | Fix the message. Send the frames and the observation again. |
+| `true` | The server closes the socket next. | Open a new socket for a new episode. |
+
+The close code tells you whose fault it was:
+
+| Close code | Meaning | Codes |
+| --- | --- | --- |
+| 1008 | The request cannot continue on this socket. | `session_busy`, `no_replica_free`, `session_expired`, `model_not_found`, `model_missing`, `spend_limit_exceeded`, `metering_unavailable` |
+| 1011 | The model or the server failed. | `model_failure` |
+
+[Errors and limits](/errors) lists every code.
+
+## Lifetime
+
+- One socket is one episode. Open a new socket for a new episode.
+- After the first observation, a session that sends no observation for 60 seconds expires. The next observation gets `session_expired` with `closing: true`.
+- Closing the socket mid-chunk cancels the model call and ends the episode.
+- Each observation is metered like one chat completion. See [Usage and billing units](/robots/usage).
+
+## Example
+
+```python socket_episode.py
+import json
+import os
+from urllib.parse import quote
+
+from websockets.sync.client import connect
+
+MODEL = "abstract/dreamzero-astra:yam"
+URL = f"wss://api.abstract.inc/v1/responses?model={quote(MODEL, safe='')}"
+HEADERS = {"Authorization": f"Bearer {os.environ['ABSTRACT_API_KEY']}"}
+
+
+def capture(camera):
+    """Return the latest JPEG from one camera. Replace this with your camera driver."""
+    with open(f"{camera}.jpg", "rb") as file:
+        return file.read()
+
+
+def read_state():
+    """Return the robot's state now. Replace this with your robot driver."""
+    return {"joint_position": [0.0] * 12, "gripper_position": [1.0, 1.0]}
+
+
+def execute(actions, dt, cameras, frames_per_camera):
+    """Run the chunk on the robot, one row every dt seconds. Replace this with your
+    controller. Return frames_per_camera JPEGs per camera taken during the chunk, oldest first."""
+    return {camera: [capture(camera) for _ in range(frames_per_camera)] for camera in cameras}
+
+
+def receive(socket):
+    message = json.loads(socket.recv())
+    if message["type"] == "error":
+        raise SystemExit(f"{message['error']['code']}: {message['error']['message']}")
+    return message
+
+
+with connect(URL, additional_headers=HEADERS, subprotocols=["abstract.responses.v1"]) as socket:
+    socket.send(json.dumps({"type": "session.open", "model": MODEL, "instruction": "fold the towel"}))
+    opened = receive(socket)
+    cameras = opened["cameras"]
+    frames = {camera: [capture(camera)] for camera in cameras}  # frames_per_camera_first is 1
+    for _ in range(3):
+        for index, camera in enumerate(cameras):
+            for jpeg in frames[camera]:
+                socket.send(bytes([index]) + jpeg)
+        socket.send(json.dumps({"type": "observation", "robot_state": read_state()}))
+        chunk = receive(socket)
+        print(f"step {chunk['step']}: {len(chunk['actions'])} actions, usage {chunk['usage']}")
+        frames = execute(chunk["actions"], chunk["dt"], cameras, opened["frames_per_camera_next"])
+    socket.send(json.dumps({"type": "session.close"}))
+    print(receive(socket))
+```
+
+Install the client with `pip install websockets`, then run it with `ABSTRACT_API_KEY="$(abstract token)" python socket_episode.py`.

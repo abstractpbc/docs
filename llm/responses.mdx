@@ -1,0 +1,141 @@
+---
+title: "Responses API"
+description: "Call the LLM models with the OpenAI Responses API: submit and poll, or stream."
+---
+
+The LLM models speak the OpenAI Responses API at `POST https://api.abstract.inc/v1/responses`.
+They do not answer on `/v1/chat/completions`. That route serves the robot models.
+
+| Model id | Contract | `stream: true` |
+| --- | --- | --- |
+| `glm-5.3:async` | Runs in the background. Poll for the result. | Buffered |
+| `deepseek-v4-flash:async` | Runs in the background. Poll for the result. | Buffered |
+| `glm-5.3:superfast` | Completes inline. | Live |
+| `deepseek-v4-flash:superfast` | Completes inline. | Live |
+| `kimi-k3:superfast` | Completes inline. | Live |
+
+`GET /v1/models` lists these ids.
+Use an id exactly as written. An id is a contract.
+
+## Request
+
+```sh
+curl -s https://api.abstract.inc/v1/responses \
+  -H "Authorization: Bearer $(abstract token)" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"model":"glm-5.3:async","input":"Summarise RFC 8628 in three sentences."}'
+```
+
+| Field | Rule |
+| --- | --- |
+| `model` | One of the ids above. Required. |
+| `input` | The OpenAI Responses `input`. |
+| `stream` | `true` returns server-sent events. Live on `:superfast`, buffered on `:async`. |
+| `max_output_tokens` | A positive integer, at most 65,536. Default 8,192 on `glm-5.3:superfast` and 4,096 on the others. |
+| `previous_response_id` | Not supported on any model. |
+| `background`, `store` | `true` is not supported on a `:superfast` model. |
+
+The API refuses an unsupported field with HTTP 422 `invalid_request` before it reserves any cost.
+The request body is at most 2 MiB.
+
+## :async models
+
+An `:async` model answers at once with a response whose `status` is `queued` or `in_progress`.
+Save its `id`.
+Poll `GET /v1/responses/{id}` until `status` is `completed`, `failed`, `cancelled` or `incomplete`.
+The job goes on when you disconnect.
+Use these models for long work nobody waits on.
+
+```sh
+curl -s https://api.abstract.inc/v1/responses/resp_abc123 \
+  -H "Authorization: Bearer $(abstract token)"
+```
+
+Only the account that created a response can read it.
+Any other account gets HTTP 404 `not_found`.
+
+### Buffered streaming
+
+`"stream": true` on an `:async` model returns a buffered stream:
+
+1. `response.created`, then `response.queued` or `response.in_progress`.
+2. `: keepalive` comments while the job runs.
+3. The whole output as Responses events after the job finishes, then the terminal event and `data: [DONE]`.
+
+The answer carries `X-Abstract-Streaming: buffered` and a `Location` header with the response's path.
+Buffered streaming does not shorten the time to the first token.
+A connection lasts at most 30 minutes, then ends with an `error` event whose code is `stream_timeout`.
+Closing the connection cancels nothing.
+Get the result with `GET /v1/responses/{id}`, or repeat the same POST with the same `Idempotency-Key`.
+
+## :superfast models
+
+A `:superfast` model completes the response inline.
+Set `"stream": true` for live server-sent events when a person is waiting.
+
+## Idempotency-Key
+
+`Idempotency-Key` is an optional header of 1 to 200 characters from `A-Z a-z 0-9 _ . / : -`.
+
+- The same POST with the same key returns the same response and never starts a second job.
+- The same key with a different body returns HTTP 409 `idempotency_conflict`.
+- Use a new key for a new request.
+- An accepted POST answers with an `Idempotency-Key` header. The API generates one when you send none.
+
+Send a key whenever a client can retry, so a retry never starts a second job.
+
+## OpenAI SDK
+
+Set the base URL to `https://api.abstract.inc/v1` and read the key from `ABSTRACT_API_KEY`.
+
+```python async_poll.py
+import os
+import time
+import uuid
+
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.abstract.inc/v1", api_key=os.environ["ABSTRACT_API_KEY"])
+
+response = client.responses.create(
+    model="glm-5.3:async",
+    input="Summarise RFC 8628 in three sentences.",
+    extra_headers={"Idempotency-Key": str(uuid.uuid4())},
+)
+while response.status in ("queued", "in_progress"):
+    time.sleep(10)
+    response = client.responses.retrieve(response.id)
+print(response.status)
+print(response.output_text)
+```
+
+```python superfast_stream.py
+import os
+import uuid
+
+from openai import OpenAI
+
+client = OpenAI(base_url="https://api.abstract.inc/v1", api_key=os.environ["ABSTRACT_API_KEY"])
+
+stream = client.responses.create(
+    model="kimi-k3:superfast",
+    input="Write a haiku about a robot arm.",
+    stream=True,
+    extra_headers={"Idempotency-Key": str(uuid.uuid4())},
+)
+for event in stream:
+    if event.type == "response.output_text.delta":
+        print(event.delta, end="", flush=True)
+print()
+```
+
+Run either with `ABSTRACT_API_KEY="$(abstract token)" python async_poll.py`.
+
+## Usage
+
+A finished response carries `usage` with `input_tokens`, `input_tokens_details.cached_tokens` and `output_tokens`.
+The response is billed from those counts at the model's per-million-token rates for input, cached input and output.
+[abstract.inc](https://abstract.inc) shows each model's output rate.
+The rates are fixed when you submit the request.
+The `model` field in every answer is the public id you sent.

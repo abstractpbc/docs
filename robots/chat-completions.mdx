@@ -1,0 +1,283 @@
+---
+title: "Chat completions"
+description: "One HTTP request turns one observation into one action chunk."
+---
+
+`POST https://api.abstract.inc/v1/chat/completions` takes one observation and returns one action chunk.
+The request uses the OpenAI chat-completion shape.
+The chunk comes back as a JSON string in the assistant message.
+
+## Request
+
+```json
+{
+  "model": "allenai/molmoact2:yam",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "put the red cup in the bin" },
+        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,/9j/..." } },
+        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,/9j/..." } },
+        { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,/9j/..." } }
+      ]
+    }
+  ],
+  "robot_state": {
+    "joint_position": [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0],
+    "gripper_position": [1.0, 0.5]
+  }
+}
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `model` | string | A robot model id from [Robot models](/robots/models). Required. |
+| `messages` | array | The server reads the last user message only. Required. |
+| `robot_state` | object | The robot's state at the time of the latest frame. Required with image parts. Its shape depends on the model. |
+| `session_id` | string | The episode id you choose. Required with image parts on a stateful model. Optional otherwise. At most 128 printable characters, no surrounding whitespace. |
+| `stream` | boolean | `true` returns server-sent events. Default `false`. |
+| `action_horizon` | integer | How many action rows to return, from 1 to the model's rows per chunk. Default: all rows. |
+| `num_inference_steps` | integer | From 1 to 4. Accepted for compatibility. No served model reads it. |
+| `handoff` | boolean | `true` is refused today with `handoff_unavailable`. See [Handoff](/robots/handoff). Default `false`. |
+
+The server ignores other fields.
+
+### The last user message
+
+- Its text parts are the task instruction. The server joins them with spaces.
+- Its image parts are the camera frames, camera-major and oldest first within a camera.
+- Each image is a `data:image/jpeg;base64,` URL. Only JPEG is accepted.
+- Each image is at most 262,144 bytes before base64 encoding.
+- The whole request body is at most 8 MiB.
+
+A request with images needs a text part.
+A session keeps one instruction from its first request to its last.
+
+### Frame order on a stateful model
+
+`abstract/dreamzero-astra:yam` takes 1 frame per camera on the first request of a session, so 3 image parts.
+Every later request takes 4 frames per camera, so 12 image parts:
+
+| Image parts | Camera | Frames |
+| --- | --- | --- |
+| 1 to 4 | `top` | oldest to latest |
+| 5 to 8 | `left` | oldest to latest |
+| 9 to 12 | `right` | oldest to latest |
+
+Take the 4 frames per camera from the chunk the robot just executed.
+The last frame of each camera is the latest one.
+
+## Answer
+
+```json
+{
+  "id": "gen-3f9a1c2b7d4e",
+  "object": "chat.completion",
+  "created": 1790000000,
+  "model": "allenai/molmoact2:yam",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"session_id\":\"anon-8c1d2e3f4a5b\",\"step\":0,\"dt\":0.03333333333333333,\"action_dim\":14,\"action_space\":\"joint_position\",\"actions\":[[0.01,-0.39,0.61,0.0,0.2,0.0,1.0,0.0,-0.4,0.6,0.0,0.2,0.0,0.5]],\"next_frames_per_camera\":1,\"timing_ms\":{\"decode\":4.1,\"queue\":0.0,\"prefill\":0.0,\"denoise\":212.5,\"encode\":0.3}}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 650,
+    "prompt_tokens_details": { "cached_tokens": 0 },
+    "completion_tokens": 30,
+    "total_tokens": 680
+  }
+}
+```
+
+The example shows one action row. A real answer holds `action_horizon` rows.
+Parse `choices[0].message.content` as JSON to get the action chunk:
+
+| Field | Meaning |
+| --- | --- |
+| `session_id` | The session this chunk belongs to. A request without `session_id` gets a generated id. |
+| `step` | The chunk's zero-based index in the session. |
+| `dt` | Seconds between consecutive action rows. |
+| `action_dim` | Values per action row. |
+| `action_space` | `joint_position` or `ee_6d_position`. See [Robot models](/robots/models). |
+| `actions` | `action_horizon` rows of `action_dim` numbers. |
+| `next_frames_per_camera` | Frames per camera the next request of this session needs. |
+| `timing_ms` | Server-side durations in milliseconds: `decode`, `queue`, `prefill`, `denoise`, `encode`. |
+| `cache` | Present when the model reports its denoiser step cache for this chunk. |
+| `context` | Present when the model reports its attention context after this chunk. |
+
+`usage` is what the chunk is billed from.
+See [Usage and billing units](/robots/usage).
+
+The answer carries two headers:
+
+| Header | Meaning |
+| --- | --- |
+| `X-Generation-Id` | The id of this generation. Quote it when you report a problem. |
+| `X-Session-Step` | The chunk's zero-based index in the session. Present when the request has a `session_id`. |
+
+## Streaming
+
+With `"stream": true`, the answer is `text/event-stream`:
+
+1. A `: processing` comment at once, then one every 250 ms until the chunk is ready.
+2. One `data:` event whose `choices[0].delta.content` holds the whole action chunk.
+3. One `data:` event with `finish_reason` `"stop"` and `usage`.
+4. `data: [DONE]`.
+
+Ignore lines that start with `:`.
+If the model fails after the stream starts, the HTTP status stays 200.
+The failure arrives as a `data:` event with an `error` object and `finish_reason` `"error"`.
+
+```python stream.py
+import base64
+import json
+import os
+
+import requests
+
+API = "https://api.abstract.inc/v1"
+MODEL = "allenai/molmoact2:yam"
+CAMERAS = ["top", "left", "right"]
+
+
+def image_part(path):
+    with open(path, "rb") as file:
+        data = base64.b64encode(file.read()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+
+
+body = {
+    "model": MODEL,
+    "stream": True,
+    "messages": [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "put the red cup in the bin"},
+                *[image_part(f"{camera}.jpg") for camera in CAMERAS],
+            ],
+        }
+    ],
+    "robot_state": {"joint_position": [0.0] * 12, "gripper_position": [1.0, 1.0]},
+}
+
+response = requests.post(
+    f"{API}/chat/completions",
+    headers={"Authorization": f"Bearer {os.environ['ABSTRACT_API_KEY']}"},
+    json=body,
+    stream=True,
+    timeout=300,
+)
+if not response.ok:
+    raise SystemExit(f"HTTP {response.status_code}: {response.text}")
+
+chunk = usage = None
+for line in response.iter_lines(decode_unicode=True):
+    if not line.startswith("data: "):
+        continue  # blank separators and ": processing" keep-alives
+    data = line.removeprefix("data: ")
+    if data == "[DONE]":
+        break
+    event = json.loads(data)
+    if "error" in event:
+        raise SystemExit(f"model failed: {event['error']}")
+    delta = event["choices"][0]["delta"]
+    if "content" in delta:
+        chunk = json.loads(delta["content"])
+    usage = event.get("usage", usage)
+
+print(f"{len(chunk['actions'])} actions, usage {usage}")
+```
+
+## Sessions
+
+A session is one episode.
+You name it with `session_id`, for example a UUID.
+
+| Rule | Stateful model | Not stateful |
+| --- | --- | --- |
+| `session_id` with image parts | Required | Optional |
+| What the server keeps | The episode's context, between requests | A step counter |
+| First request of a session | 1 frame per camera | 1 frame per camera |
+| Later requests | `next_frames_per_camera` frames per camera | 1 frame per camera |
+
+- A new `session_id` starts a new episode. There is no reset call.
+- Keep the instruction the same for the whole session. A change returns `instruction_changed`.
+- Send one request per session at a time. An overlapping request returns HTTP 409 `session_busy`.
+- A session expires after 60 seconds without a request.
+- On a stateful model, a request for an expired session returns HTTP 410 `session_expired`. Start a new session with a new `session_id` and 1 frame per camera.
+- When no capacity is free for a new session, the API returns HTTP 429 `no_replica_free` with a `Retry-After` header. Existing sessions keep running.
+
+```python episode.py
+import base64
+import json
+import os
+import uuid
+
+import requests
+
+API = "https://api.abstract.inc/v1"
+HEADERS = {"Authorization": f"Bearer {os.environ['ABSTRACT_API_KEY']}"}
+MODEL = "abstract/dreamzero-astra:yam"
+CAMERAS = ["top", "left", "right"]
+INSTRUCTION = "fold the towel"
+
+
+def capture(camera):
+    """Return the latest JPEG from one camera. Replace this with your camera driver."""
+    with open(f"{camera}.jpg", "rb") as file:
+        return file.read()
+
+
+def read_state():
+    """Return the robot's state now. Replace this with your robot driver."""
+    return {"joint_position": [0.0] * 12, "gripper_position": [1.0, 1.0]}
+
+
+def execute(actions, dt, frames_per_camera):
+    """Run the chunk on the robot, one row every dt seconds. Replace this with your
+    controller. Return frames_per_camera JPEGs per camera taken during the chunk, oldest first."""
+    return {camera: [capture(camera) for _ in range(frames_per_camera)] for camera in CAMERAS}
+
+
+def image_part(jpeg):
+    data = base64.b64encode(jpeg).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+
+
+def request_chunk(session_id, frames):
+    content = [{"type": "text", "text": INSTRUCTION}]
+    for camera in CAMERAS:  # camera-major, oldest frame first
+        content += [image_part(jpeg) for jpeg in frames[camera]]
+    body = {
+        "model": MODEL,
+        "session_id": session_id,
+        "messages": [{"role": "user", "content": content}],
+        "robot_state": read_state(),
+    }
+    response = requests.post(f"{API}/chat/completions", headers=HEADERS, json=body, timeout=300)
+    # HTTP 410 means the session expired: start again with a new session_id.
+    if not response.ok:
+        raise SystemExit(f"HTTP {response.status_code}: {response.text}")
+    return json.loads(response.json()["choices"][0]["message"]["content"])
+
+
+session_id = str(uuid.uuid4())  # a new id starts a new episode
+frames = {camera: [capture(camera)] for camera in CAMERAS}  # 1 frame per camera opens it
+for _ in range(3):
+    chunk = request_chunk(session_id, frames)
+    print(f"step {chunk['step']}: {len(chunk['actions'])} actions")
+    frames = execute(chunk["actions"], chunk["dt"], chunk["next_frames_per_camera"])
+```
+
+## A request without images
+
+A request whose last user message has no image parts returns a short text description of the model's inputs and outputs.
+Its `usage` is zero.
+Use it to check a model id and its expected shapes.

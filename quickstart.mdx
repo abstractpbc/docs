@@ -1,0 +1,124 @@
+---
+title: "Quickstart"
+description: "Set up billing, sign in with the CLI, and make a first robot call and a first LLM call."
+---
+
+<Steps>
+  <Step title="Set up billing">
+    Open [abstract.inc/start?setup=billing](https://abstract.inc/start?setup=billing) and sign in.
+    Add a payment method and set your monthly spend limit.
+    Abstract creates no API key and runs no model until the account has a payment method or credit.
+  </Step>
+  <Step title="Install the CLI">
+    The `abstract` command signs you in and saves an API key on your machine.
+
+    ```sh
+    curl -fsSL https://abstract.inc/install.sh | bash
+    ```
+
+    The installer supports macOS and Linux on arm64 and x64.
+  </Step>
+  <Step title="Sign in">
+    ```sh
+    abstract login
+    ```
+
+    The command prints a link and a code.
+    Open the link in a browser and confirm the code.
+    The command then saves an API key and exits.
+    Check the key against the API:
+
+    ```sh
+    abstract status
+    ```
+  </Step>
+  <Step title="Make a first robot call">
+    This call sends one observation to `allenai/molmoact2:yam` and prints the action chunk it returns.
+    Save one JPEG from each camera as `top.jpg`, `left.jpg` and `right.jpg`.
+    Replace `robot_state` with your robot's state when you took the frames.
+
+    ```python first_robot_call.py
+    import base64
+    import json
+    import os
+
+    import requests
+
+    API = "https://api.abstract.inc/v1"
+    MODEL = "allenai/molmoact2:yam"
+    CAMERAS = ["top", "left", "right"]  # the order this model expects
+
+
+    def image_part(path):
+        with open(path, "rb") as file:
+            data = base64.b64encode(file.read()).decode()
+        return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+
+
+    body = {
+        "model": MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "put the red cup in the bin"},
+                    *[image_part(f"{camera}.jpg") for camera in CAMERAS],
+                ],
+            }
+        ],
+        "robot_state": {
+            # Left joints 1-6, then right joints 1-6, in radians.
+            "joint_position": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            # Left gripper, then right gripper: 0 is closed, 1 is open.
+            "gripper_position": [1.0, 1.0],
+        },
+    }
+
+    response = requests.post(
+        f"{API}/chat/completions",
+        headers={"Authorization": f"Bearer {os.environ['ABSTRACT_API_KEY']}"},
+        json=body,
+        timeout=300,
+    )
+    if not response.ok:
+        raise SystemExit(f"HTTP {response.status_code}: {response.text}")
+    answer = response.json()
+    chunk = json.loads(answer["choices"][0]["message"]["content"])
+    print(f"{len(chunk['actions'])} actions of {chunk['action_dim']} values, dt {chunk['dt']:.4f} s")
+    print("first action:", chunk["actions"][0])
+    print("usage:", answer["usage"])
+    ```
+
+    Run it with the key in the program's environment only:
+
+    ```sh
+    pip install requests
+    ABSTRACT_API_KEY="$(abstract token)" python first_robot_call.py
+    ```
+
+    The answer holds 30 actions of 14 values each, one every 1/30 s.
+    [Robot models](/robots/models) lists the shapes of every model.
+  </Step>
+  <Step title="Make a first LLM call">
+    The LLM models speak the OpenAI Responses API at `POST /v1/responses`.
+    A `:superfast` model answers inline:
+
+    ```sh
+    curl -s https://api.abstract.inc/v1/responses \
+      -H "Authorization: Bearer $(abstract token)" \
+      -H "Content-Type: application/json" \
+      -H "Idempotency-Key: $(uuidgen)" \
+      -d '{"model":"glm-5.3:superfast","input":"Summarise RFC 8628 in three sentences."}'
+    ```
+
+    An `:async` model answers at once with a queued response that you poll.
+    [Responses API](/llm/responses) shows both.
+  </Step>
+</Steps>
+
+## Next steps
+
+- [Authentication and keys](/authentication): keep the key out of logs and handle 401.
+- [Chat completions](/robots/chat-completions): run a whole episode over HTTP.
+- [Sessions over WebSocket](/robots/sessions): run an episode on one socket.
+- [Errors and limits](/errors): what each error code asks you to do.

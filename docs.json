@@ -1,0 +1,136 @@
+{
+	"$schema": "https://mintlify.com/docs.json",
+	"theme": "willow",
+	"name": "Abstract",
+	"description": "One API for robot action models and LLMs.",
+	"colors": {
+		"primary": "#0562ef",
+		"light": "#4b8ef7",
+		"dark": "#0450c8"
+	},
+	"logo": {
+		"light": "/logo/light.svg",
+		"dark": "/logo/dark.svg"
+	},
+	"favicon": "/favicon.png",
+	"fonts": {
+		"heading": {
+			"family": "Geist",
+			"source": "/fonts/geist-sans.woff2",
+			"format": "woff2",
+			"weight": 600
+		},
+		"body": {
+			"family": "Geist",
+			"source": "/fonts/geist-sans.woff2",
+			"format": "woff2",
+			"weight": 400
+		}
+	},
+	"appearance": {
+		"default": "light"
+	},
+	"background": {
+		"color": {
+			"light": "#ffffff",
+			"dark": "#0b1015"
+		}
+	},
+	"navbar": {
+		"links": [
+			{
+				"label": "abstract.inc",
+				"href": "https://abstract.inc"
+			}
+		],
+		"primary": {
+			"type": "button",
+			"label": "Get started",
+			"href": "https://abstract.inc/start"
+		}
+	},
+	"navigation": {
+		"tabs": [
+			{
+				"tab": "Guides",
+				"groups": [
+					{
+						"group": "Get started",
+						"pages": ["index", "quickstart", "authentication"]
+					},
+					{
+						"group": "Robot models",
+						"pages": [
+							"robots/models",
+							"robots/chat-completions",
+							"robots/sessions",
+							"robots/handoff",
+							"robots/usage"
+						]
+					},
+					{
+						"group": "LLM models",
+						"pages": ["llm/responses"]
+					},
+					{
+						"group": "Reference",
+						"pages": ["errors", "cli"]
+					}
+				]
+			},
+			{
+				"tab": "API reference",
+				"groups": [
+					{
+						"group": "Overview",
+						"pages": ["api-reference/introduction"]
+					},
+					{
+						"group": "Endpoints",
+						"openapi": "api-reference/openapi.yaml",
+						"pages": [
+							"POST /v1/chat/completions",
+							"POST /v1/responses",
+							"GET /v1/responses/{response_id}",
+							"GET /v1/models"
+						]
+					}
+				]
+			}
+		]
+	},
+	"api": {
+		"playground": {
+			"display": "simple",
+			"proxy": false
+		},
+		"examples": {
+			"languages": ["curl", "python"]
+		}
+	},
+	"footer": {
+		"links": [
+			{
+				"header": "Abstract",
+				"items": [
+					{
+						"label": "Pricing",
+						"href": "https://abstract.inc/pricing"
+					},
+					{
+						"label": "Get started",
+						"href": "https://abstract.inc/start"
+					},
+					{
+						"label": "Terms",
+						"href": "https://abstract.inc/terms"
+					},
+					{
+						"label": "Privacy",
+						"href": "https://abstract.inc/privacy"
+					}
+				]
+			}
+		]
+	}
+}
