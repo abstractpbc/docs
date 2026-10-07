@@ -476,7 +476,7 @@ components:
       properties:
         model:
           type: string
-          enum: [abstract/dreamzero-astra:yam, allenai/molmoact2:yam, microsoft/rho:yam]
+          enum: [abstract/dreamzero-astra:yam, stealth/picasso:yam, allenai/molmoact2:yam, microsoft/rho:yam]
           description: A robot model id.
         messages:
           type: array
@@ -492,7 +492,7 @@ components:
         session_id:
           type: string
           maxLength: 128
-          description: The episode id you choose. Required with image parts on `abstract/dreamzero-astra:yam`; optional on the others. A new value starts a new episode.
+          description: The episode id you choose. Required with image parts on `abstract/dreamzero-astra:yam` and `stealth/picasso:yam`; optional on the others. A new value starts a new episode.
         stream:
           type: boolean
           default: false
@@ -515,7 +515,7 @@ components:
     YamJointState:
       type: object
       title: YAM joint state
-      description: '`abstract/dreamzero-astra:yam` and `allenai/molmoact2:yam`.'
+      description: '`abstract/dreamzero-astra:yam`, `stealth/picasso:yam` and `allenai/molmoact2:yam`.'
       required: [joint_position, gripper_position]
       properties:
         joint_position:

@@ -29,8 +29,11 @@ A smaller `action_horizon` returns fewer rows but does not lower `completion_tok
 | Model | `completion_tokens` per chunk | `cached_tokens` |
 | --- | --- | --- |
 | `abstract/dreamzero-astra:yam` | 24 | The part of the episode's attention window reused from earlier chunks |
+| `stealth/picasso:yam` | 24 | The part of the episode's attention window reused from earlier chunks |
 | `allenai/molmoact2:yam` | 30 | 0 |
 | `microsoft/rho:yam` | 25 | 0 |
+
+Picasso currently runs DreamZero-Astra as a placeholder at 50% off: $0.40 per million input tokens, $0.005 per million cached input tokens, and $0.25 per million actions. The model's usage units are unchanged; the lower rates apply to both chat completions and WebSocket observations.
 
 Read `usage` from each answer. Do not compute it yourself.
 A JPEG count is not a token count.
