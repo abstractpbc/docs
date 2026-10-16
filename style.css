@@ -1,0 +1,33 @@
+/* Abstract docs: the site's type and a wider reading column. Mintlify includes every .css
+   file in this directory on every page. Only documented hooks are used:
+   https://www.mintlify.com/docs/customize/custom-scripts */
+
+/* Geist Mono for code, as on abstract.inc. An @import must precede every other rule. */
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap");
+
+:root {
+	--content-width: 44rem;
+}
+
+code,
+pre,
+kbd {
+	font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-variant-ligatures: none;
+}
+
+/* Tighter display type, as on abstract.inc. */
+#page-title {
+	letter-spacing: -0.025em;
+}
+
+.mdx-content h2,
+.mdx-content h3 {
+	letter-spacing: -0.015em;
+}
+
+/* The assistant opens from the header (Ask Assistant, Cmd+I). Its floating input would
+   otherwise sit over the bottom of the reading column on every page. */
+.chat-assistant-floating-input {
+	display: none;
+}

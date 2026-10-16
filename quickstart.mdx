@@ -1,6 +1,7 @@
 ---
 title: "Quickstart"
 description: "Set up billing, sign in with the CLI, and make a first robot call and a first LLM call."
+icon: "rocket"
 ---
 
 <Steps>
@@ -103,7 +104,8 @@ description: "Set up billing, sign in with the CLI, and make a first robot call 
     The LLM models speak the OpenAI Responses API at `POST /v1/responses`.
     A `:superfast` model answers inline:
 
-    ```sh
+    <CodeGroup>
+    ```sh cURL
     curl -s https://api.abstract.inc/v1/responses \
       -H "Authorization: Bearer $(abstract token)" \
       -H "Content-Type: application/json" \
@@ -111,6 +113,39 @@ description: "Set up billing, sign in with the CLI, and make a first robot call 
       -d '{"model":"glm-5.3:superfast","input":"Summarise RFC 8628 in three sentences."}'
     ```
 
+    ```python Python
+    import os
+    import uuid
+
+    from openai import OpenAI
+
+    client = OpenAI(base_url="https://api.abstract.inc/v1", api_key=os.environ["ABSTRACT_API_KEY"])
+
+    response = client.responses.create(
+        model="glm-5.3:superfast",
+        input="Summarise RFC 8628 in three sentences.",
+        extra_headers={"Idempotency-Key": str(uuid.uuid4())},
+    )
+    print(response.output_text)
+    ```
+
+    ```typescript TypeScript
+    import OpenAI from "openai"
+
+    const client = new OpenAI({
+      baseURL: "https://api.abstract.inc/v1",
+      apiKey: process.env.ABSTRACT_API_KEY,
+    })
+
+    const response = await client.responses.create(
+      { model: "glm-5.3:superfast", input: "Summarise RFC 8628 in three sentences." },
+      { headers: { "Idempotency-Key": crypto.randomUUID() } },
+    )
+    console.log(response.output_text)
+    ```
+    </CodeGroup>
+
+    Run a Python or TypeScript program the same way, with `ABSTRACT_API_KEY="$(abstract token)"` in its environment.
     An `:async` model answers at once with a queued response that you poll.
     [Responses API](/llm/responses) shows both.
   </Step>
@@ -118,7 +153,17 @@ description: "Set up billing, sign in with the CLI, and make a first robot call 
 
 ## Next steps
 
-- [Authentication and keys](/authentication): keep the key out of logs and handle 401.
-- [Chat completions](/robots/chat-completions): run a whole episode over HTTP.
-- [Sessions over WebSocket](/robots/sessions): run an episode on one socket.
-- [Errors and limits](/errors): what each error code asks you to do.
+<Columns cols={2}>
+  <Card title="Authentication and keys" icon="key-round" href="/authentication">
+    Keep the key out of logs and handle 401.
+  </Card>
+  <Card title="Chat completions" icon="message-square-code" href="/robots/chat-completions">
+    Run a whole episode over HTTP.
+  </Card>
+  <Card title="Sessions over WebSocket" icon="plug-zap" href="/robots/sessions">
+    Run an episode on one socket.
+  </Card>
+  <Card title="Errors and limits" icon="triangle-alert" href="/errors">
+    What each error code asks you to do.
+  </Card>
+</Columns>

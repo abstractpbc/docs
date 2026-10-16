@@ -1,22 +1,14 @@
 ---
 title: "API reference"
 description: "The HTTP endpoints of api.abstract.inc."
+icon: "book-open"
 ---
 
 | Item | Value |
 | --- | --- |
 | Base URL | `https://api.abstract.inc` |
 | Authentication | `Authorization: Bearer` with your API key, on every endpoint |
-| Request and answer bodies | JSON, or server-sent events when `stream` is `true` |
-
-| Endpoint | Serves |
-| --- | --- |
-| `POST /v1/chat/completions` | Robot models: one observation in, one action chunk out |
-| `POST /v1/responses` | LLM models: the OpenAI Responses API |
-| `GET /v1/responses/{response_id}` | LLM models: retrieve a response your account created |
-| `GET /v1/models` | The LLM model ids |
-
-The WebSocket at `wss://api.abstract.inc/v1/responses` is on [Sessions over WebSocket](/robots/sessions).
+| Request and answer bodies | JSON, server-sent events when `stream` is `true`, or a file's bytes on the robot run file routes |
 
 These pages describe each request. They do not send requests.
 Run requests from your own machine, with the key in your program's environment:
@@ -26,3 +18,53 @@ curl -s https://api.abstract.inc/v1/models -H "Authorization: Bearer $(abstract 
 ```
 
 Every error has the same body. See [Errors and limits](/errors).
+
+<Columns cols={3}>
+  <Card title="Robot models" icon="bot" href="/api-reference/robot-models/create-an-action-chunk">
+    One observation in, one action chunk out.
+  </Card>
+  <Card title="Robot runs" icon="hard-drive" href="/api-reference/robot-runs/list-robot-runs">
+    Store, list, download and delete your robot runs.
+  </Card>
+  <Card title="LLM models" icon="sparkles" href="/api-reference/llm-models/create-a-response">
+    The OpenAI Responses API.
+  </Card>
+</Columns>
+
+## Robot models
+
+| Endpoint | Serves |
+| --- | --- |
+| [`POST /v1/chat/completions`](/api-reference/robot-models/create-an-action-chunk) | One observation in, one action chunk out |
+
+The WebSocket at `wss://api.abstract.inc/v1/responses` runs a whole episode on one socket.
+OpenAPI does not describe it. See [Sessions over WebSocket](/robots/sessions).
+
+## Robot runs
+
+`/v1/robot/runs` stores your robot runs (episode logs, the Rerun recording with the camera video) under your account, and lists, downloads and deletes them.
+Only the key's account reaches its runs.
+An account stores up to 100 GiB of runs.
+
+| Endpoint | Serves |
+| --- | --- |
+| [`GET /v1/robot/runs`](/api-reference/robot-runs/list-robot-runs) | List your completed runs |
+| [`GET /v1/robot/runs/usage`](/api-reference/robot-runs/robot-runs-usage) | What your runs hold against the quota, and this month's metering |
+| [`GET /v1/robot/runs/{robot}/{run}`](/api-reference/robot-runs/get-a-robot-run) | A completed run's manifest |
+| [`DELETE /v1/robot/runs/{robot}/{run}`](/api-reference/robot-runs/delete-a-robot-run) | Delete every file of a run |
+| [`POST /v1/robot/runs/{robot}/{run}/complete`](/api-reference/robot-runs/complete-a-robot-run) | Complete a run, so it is listed |
+| [`PUT /v1/robot/runs/{robot}/{run}/files/{path}`](/api-reference/robot-runs/upload-a-run-file) | Upload a file of at most 64 MiB |
+| [`GET /v1/robot/runs/{robot}/{run}/files/{path}`](/api-reference/robot-runs/download-a-run-file) | Download a file |
+| [`DELETE /v1/robot/runs/{robot}/{run}/files/{path}`](/api-reference/robot-runs/delete-a-run-file) | Delete a file |
+| [`GET /v1/robot/runs/{robot}/{run}/uploads/{path}`](/api-reference/robot-runs/resume-a-multipart-upload) | Resume a multipart upload |
+| [`POST /v1/robot/runs/{robot}/{run}/uploads/{path}`](/api-reference/robot-runs/start-or-finish-a-multipart-upload) | Start or finish a multipart upload |
+| [`PUT /v1/robot/runs/{robot}/{run}/uploads/{path}`](/api-reference/robot-runs/upload-a-part) | Upload one part |
+| [`DELETE /v1/robot/runs/{robot}/{run}/uploads/{path}`](/api-reference/robot-runs/abort-a-multipart-upload) | Abort a multipart upload |
+
+## LLM models
+
+| Endpoint | Serves |
+| --- | --- |
+| [`POST /v1/responses`](/api-reference/llm-models/create-a-response) | The OpenAI Responses API |
+| [`GET /v1/responses/{response_id}`](/api-reference/llm-models/retrieve-a-response) | Retrieve a response your account created |
+| [`GET /v1/models`](/api-reference/llm-models/list-llm-models) | The LLM model ids |

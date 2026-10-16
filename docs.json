@@ -1,12 +1,12 @@
 {
 	"$schema": "https://mintlify.com/docs.json",
-	"theme": "willow",
+	"theme": "aspen",
 	"name": "Abstract",
 	"description": "One API for robot action models and LLMs.",
 	"colors": {
-		"primary": "#0562ef",
-		"light": "#4b8ef7",
-		"dark": "#0450c8"
+		"primary": "#D6005A",
+		"light": "#FD0365",
+		"dark": "#D6005A"
 	},
 	"logo": {
 		"light": "/logo/light.svg",
@@ -16,31 +16,43 @@
 	"fonts": {
 		"heading": {
 			"family": "Geist",
-			"source": "/fonts/geist-sans.woff2",
-			"format": "woff2",
 			"weight": 600
 		},
 		"body": {
 			"family": "Geist",
-			"source": "/fonts/geist-sans.woff2",
-			"format": "woff2",
 			"weight": 400
 		}
 	},
+	"icons": {
+		"library": "lucide"
+	},
 	"appearance": {
-		"default": "light"
+		"default": "dark"
 	},
 	"background": {
 		"color": {
-			"light": "#ffffff",
-			"dark": "#0b1015"
+			"light": "#FFFFFF",
+			"dark": "#0B0B0E"
 		}
+	},
+	"styling": {
+		"eyebrows": "section"
+	},
+	"search": {
+		"prompt": "Search the docs"
+	},
+	"contextual": {
+		"options": ["copy", "view"]
 	},
 	"navbar": {
 		"links": [
 			{
-				"label": "abstract.inc",
-				"href": "https://abstract.inc"
+				"label": "Pricing",
+				"href": "https://abstract.inc/pricing"
+			},
+			{
+				"label": "Platform",
+				"href": "https://platform.abstract.inc"
 			}
 		],
 		"primary": {
@@ -53,6 +65,7 @@
 		"tabs": [
 			{
 				"tab": "Guides",
+				"icon": "book-open",
 				"groups": [
 					{
 						"group": "Get started",
@@ -80,20 +93,37 @@
 			},
 			{
 				"tab": "API reference",
+				"icon": "square-terminal",
+				"openapi": "api-reference/openapi.yaml",
 				"groups": [
 					{
 						"group": "Overview",
 						"pages": ["api-reference/introduction"]
 					},
 					{
-						"group": "Endpoints",
-						"openapi": "api-reference/openapi.yaml",
+						"group": "Robot models",
+						"pages": ["POST /v1/chat/completions"]
+					},
+					{
+						"group": "Robot runs",
 						"pages": [
-							"POST /v1/chat/completions",
-							"POST /v1/responses",
-							"GET /v1/responses/{response_id}",
-							"GET /v1/models"
+							"GET /v1/robot/runs",
+							"GET /v1/robot/runs/usage",
+							"GET /v1/robot/runs/{robot}/{run}",
+							"DELETE /v1/robot/runs/{robot}/{run}",
+							"POST /v1/robot/runs/{robot}/{run}/complete",
+							"PUT /v1/robot/runs/{robot}/{run}/files/{path}",
+							"GET /v1/robot/runs/{robot}/{run}/files/{path}",
+							"DELETE /v1/robot/runs/{robot}/{run}/files/{path}",
+							"GET /v1/robot/runs/{robot}/{run}/uploads/{path}",
+							"POST /v1/robot/runs/{robot}/{run}/uploads/{path}",
+							"PUT /v1/robot/runs/{robot}/{run}/uploads/{path}",
+							"DELETE /v1/robot/runs/{robot}/{run}/uploads/{path}"
 						]
+					},
+					{
+						"group": "LLM models",
+						"pages": ["POST /v1/responses", "GET /v1/responses/{response_id}", "GET /v1/models"]
 					}
 				]
 			}
@@ -111,16 +141,34 @@
 	"footer": {
 		"links": [
 			{
-				"header": "Abstract",
+				"header": "Product",
 				"items": [
 					{
 						"label": "Pricing",
 						"href": "https://abstract.inc/pricing"
 					},
 					{
-						"label": "Get started",
-						"href": "https://abstract.inc/start"
+						"label": "Platform",
+						"href": "https://platform.abstract.inc"
+					}
+				]
+			},
+			{
+				"header": "Company",
+				"items": [
+					{
+						"label": "Blog",
+						"href": "https://abstract.inc/blog"
 					},
+					{
+						"label": "Careers",
+						"href": "https://abstract.inc/careers"
+					}
+				]
+			},
+			{
+				"header": "Legal",
+				"items": [
 					{
 						"label": "Terms",
 						"href": "https://abstract.inc/terms"

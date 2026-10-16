@@ -1,6 +1,7 @@
 ---
 title: "Robot models"
 description: "Cameras, frames, state, and action shapes for each served robot model."
+icon: "bot"
 ---
 
 Every served robot model drives a bimanual YAM.
@@ -151,6 +152,74 @@ The model computes 50 rows and returns the first 25.
 }
 ```
 
+## perceptron/isaac-0.5:yam
+
+Perceptron's Isaac 0.5 for the bimanual YAM.
+It reads one frame per camera and keeps no state between requests.
+It was trained on Ai2's MolmoAct2-BimanualYAM recordings, so it expects the same overhead and wrist views as MolmoAct2.
+
+| Fact | Value |
+| --- | --- |
+| Model id | `perceptron/isaac-0.5:yam` |
+| Cameras, in order | `top`, `left`, `right` |
+| Image size | 640x360 JPEG. The server resizes other sizes to 640x360. |
+| Frames per camera, first request | 1 |
+| Frames per camera, later requests | 1 |
+| `joint_position` | 12 numbers: left joints 1-6, then right joints 1-6, in radians. |
+| `gripper_position` | 2 numbers: left, then right. 0 is closed, 1 is open. |
+| `cartesian_position` | Not accepted |
+| Action rows per chunk | 30 |
+| Values per action row | 14: left joints 1-6, left gripper, right joints 1-6, right gripper. Joints are absolute positions in radians. |
+| Action space | `joint_position` |
+| Control rate | 30 Hz (`dt` = 1/30 s) |
+| Stateful | No |
+| `session_id` | Optional |
+
+The model computes 50 rows and returns the first 30.
+Its joint scaling comes from one recorded session of that dataset.
+Expect worse motion on a rig whose cameras or start pose differ from those recordings.
+
+```json robot_state
+{
+  "joint_position": [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0],
+  "gripper_position": [1.0, 0.5]
+}
+```
+
+## physical-intelligence/pi0.5:yam
+
+π0.5 fine-tuned for the bimanual YAM.
+It reads one frame per camera and keeps no state between requests.
+It was trained on Ai2's MolmoAct2-BimanualYAM recordings, so it expects the same overhead and wrist views as MolmoAct2.
+
+| Fact | Value |
+| --- | --- |
+| Model id | `physical-intelligence/pi0.5:yam` |
+| Cameras, in order | `top`, `left`, `right` |
+| Image size | 640x360 JPEG. The server resizes other sizes to 640x360. |
+| Frames per camera, first request | 1 |
+| Frames per camera, later requests | 1 |
+| `joint_position` | 12 numbers: left joints 1-6, then right joints 1-6, in radians. |
+| `gripper_position` | 2 numbers: left, then right. 0 is closed, 1 is open. |
+| `cartesian_position` | Not accepted |
+| Action rows per chunk | 30 |
+| Values per action row | 14: left joints 1-6, left gripper, right joints 1-6, right gripper. Joints are absolute positions in radians. |
+| Action space | `joint_position` |
+| Control rate | 30 Hz (`dt` = 1/30 s) |
+| Stateful | No |
+| `session_id` | Optional |
+
+The weights are a community fine-tune of π0.5, not a release by Physical Intelligence.
+They have not been evaluated on a robot.
+Expect worse motion on a rig whose cameras or start pose differ from those recordings.
+
+```json robot_state
+{
+  "joint_position": [0.0, -0.4, 0.6, 0.0, 0.2, 0.0, 0.0, -0.4, 0.6, 0.0, 0.2, 0.0],
+  "gripper_position": [1.0, 0.5]
+}
+```
+
 ## What the server checks
 
 | Check | Error code |
@@ -158,7 +227,7 @@ The model computes 50 rows and returns the first 25.
 | Frame count per camera does not match the table | `image_count_mismatch` |
 | A state array has the wrong length, or a value is not a finite number | `state_shape_mismatch` |
 | `cartesian_position` is missing on `microsoft/rho:yam`, or present on another model | `state_shape_mismatch` |
-| A gripper value is outside 0 to 1 on `abstract/dreamzero-astra:yam`, `stealth/picasso:yam` or `allenai/molmoact2:yam` | `invalid_image` |
+| A gripper value is outside 0 to 1 on `abstract/dreamzero-astra:yam`, `stealth/picasso:yam`, `allenai/molmoact2:yam`, `perceptron/isaac-0.5:yam` or `physical-intelligence/pi0.5:yam` | `invalid_image` |
 | A rotation6d is degenerate on `microsoft/rho:yam` | `invalid_image` |
 | A frame is not a decodable JPEG, or has an edge over 4096 pixels | `invalid_image` |
 

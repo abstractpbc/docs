@@ -1,6 +1,7 @@
 ---
 title: "Errors and limits"
 description: "Every error code the robot and LLM routes return, with its HTTP status and what to do."
+icon: "triangle-alert"
 ---
 
 An error answer has a JSON body with one `error` object:
@@ -26,7 +27,8 @@ Branch on `code`.
 | --- | --- | --- | --- |
 | 401 | `missing_api_key` | The request has no Bearer key. | Send `Authorization: Bearer` with your key. |
 | 401 | `invalid_api_key` | The key is wrong or revoked. | Run `abstract status`, then `abstract login` if it fails. Do not retry with the same key. |
-| 402 | `payment_required` | The account has no payment method and no credit. | Add one at [abstract.inc/start?setup=billing](https://abstract.inc/start?setup=billing). |
+| 402 | `payment_required` | The account has no payment method and no credit. | Buy credit in [Platform Billing](https://platform.abstract.inc/billing). |
+| 402 | `insufficient_credit` | Available prepaid credit cannot cover the request's maximum cost. Nothing ran. | Buy credit in [Platform Billing](https://platform.abstract.inc/billing). A saved card alone does not fund usage. |
 | 429 | `spend_limit_exceeded` | The request would cross the account's monthly spend limit. Nothing ran. | Tell the account owner. Do not retry. |
 | 503 | `auth_unavailable` | Key verification is down. | Retry with backoff. |
 | 503 | `billing_unavailable` | Billing is down. | Retry with backoff. |
@@ -62,6 +64,10 @@ These codes come from `POST /v1/chat/completions`.
 | 400 | `image_count_mismatch` | The number of image parts does not match the model and the session step. | Send the frames per camera that the model's table and `next_frames_per_camera` name. |
 | 400 | `instruction_changed` | The instruction differs from the session's first request. | Keep the instruction, or start a new session. |
 | 400 | `invalid_image` | The model cannot use a frame or a state value: an undecodable JPEG, an edge over 4096 pixels, a gripper outside 0 to 1, or a degenerate rotation. | Fix the value the message names. |
+| 409 | `idempotency_conflict` | Observation id was used with different content. | Preserve the original id and payload for a retry. |
+| 409 | `session_step_conflict` | The expected step differs from the next session step. | Reconcile the previous observation's result before advancing. |
+| 409/503 | `observation_outcome_unknown` | The observation is pending or its result was not retained. | Retry only the same id; never bypass the claim with a new id. |
+| 400 | `invalid_expected_step` | Expected step is not a nonnegative integer. | Start at zero and advance only after accepting the previous result. |
 | 409 | `session_busy` | Another request for this `session_id` is still running. | Wait for it. Send one request per session at a time. |
 | 410 | `session_expired` | The session expired or its state is gone. | Start a new session with a new `session_id` and 1 frame per camera. |
 | 413 | `image_too_large` | An image is over 262,144 bytes. | Lower the JPEG quality or the size. |
@@ -79,7 +85,9 @@ Its `code` is one of the codes above, for example `model_failure` or `session_ex
 The handshake refusals are in [Sessions over WebSocket](/robots/sessions#connect).
 On an open socket, an error arrives as a `{"type":"error"}` message with a `closing` flag.
 
-With `closing: false`, the session stays where it was. Fix the message and send it again:
+With `closing: false`, the rejected observation does not advance the session. Other queued
+observations may still run. An observation error carries its `observation_id`; frame and
+session-control errors do not. Fix the message and send it again:
 
 | Code | Meaning |
 | --- | --- |
@@ -108,8 +116,15 @@ With `closing: true`, the socket closes next:
 | `no_replica_free` | 1008 | Wait, then open a new socket. |
 | `session_expired` | 1008 | Open a new socket. |
 | `spend_limit_exceeded` | 1008 | Tell the account owner. Do not retry. |
+| `insufficient_credit` | 1008 | Buy API credit in Platform before opening a new socket. |
 | `metering_unavailable` | 1008 | Retry with backoff on a new socket. |
 | `model_failure` | 1011 | Retry on a new socket. |
+| `invalid_observation_id` | 1008 | Use 1–128 characters from `A-Z a-z 0-9 . _ : -`, or omit the id. |
+| `idempotency_conflict` | 1008 | The id was used with different content. Preserve the original controls and frames when retrying. |
+| `observation_outcome_unknown` | 1008 | Retry only the same id and session; the service will not execute it again. |
+| `too_many_observations` | 1008 | Keep at most eight observations outstanding; wait for replies before submitting more. |
+| `message_too_large` | 1008 | A control message exceeds 65,536 characters, observation frames exceed 16 MiB, or pending socket ingress exceeds 16 MiB or 128 messages. Reduce the observation and wait for replies before sending more. |
+| `engine_protocol_error` | 1011 | The service could not correlate an action result. Open a new socket; report persistent failures. |
 
 ## LLM models
 
@@ -137,6 +152,28 @@ A buffered stream can end with an `error` event:
 | `stream_timeout` | The connection reached 30 minutes. The job goes on. | Poll `GET /v1/responses/{id}`. |
 | `stream_unavailable` | The stream could not read the job. The job goes on. | Poll `GET /v1/responses/{id}`, or repeat the POST with the same `Idempotency-Key`. |
 
+## Robot runs
+
+These codes come from `/v1/robot/runs`.
+
+| HTTP | Code | Meaning | What to do |
+| --- | --- | --- | --- |
+| 404 | `run_not_found` | No completed run by that name in your account. | List your runs, or complete this one. |
+| 404 | `file_not_found` | The run has no file at that path. | Check the path. |
+| 404 | `upload_not_found` | No multipart upload with that `upload_id` for this file. | Start a new upload. |
+| 409 | `upload_in_progress` | Another unfinished upload owns this path, or the run is not ready to complete. | Resume or abort that upload, then retry. |
+| 429 | `too_many_uploads` | This run already has 16 unfinished uploads. | Finish or abort one before starting another. |
+| 503 | `storage_busy` | The run has too many concurrent storage requests. | Retry with backoff. |
+| 409 | `run_incomplete` | A listed file is missing or has another size, or a stored file is not listed. | Upload or delete what the message names, then complete again. |
+| 411 | `length_required` | An upload has no `Content-Length`. | Send it. |
+| 413 | `request_too_large` | A file or part is over 64 MiB, or a JSON body over 1 MiB. | Upload the file in parts. |
+| 413 | `run_too_large` | The run would hold over 2 GiB or 2,000 files. | Split the run. |
+| 413 | `storage_quota_exceeded` | Committed files plus upload reservations would exceed the quota. A staged upload is preserved for retry or abort. | Delete runs you no longer need (`GET /v1/robot/runs/usage` shows stored and reserved bytes), abort unfinished uploads, or ask us for more room. Publication needs room for a temporary additional copy. |
+| 416 | `invalid_range` | The `Range` cannot be served. | Ask for a range inside the file. |
+| 422 | `checksum_mismatch` | The body, or the assembled file, is not the SHA-256 you sent. Nothing was kept. | Upload it again. |
+| 422 | `invalid_request` | A robot or run name, a path, the query or the body breaks its format. | Fix it; the message says which. |
+| 503 | `storage_unavailable` | Run storage is down. | Retry with backoff. |
+
 ## Limits
 
 | Limit | Value |
@@ -147,7 +184,12 @@ A buffered stream can end with an `error` event:
 | Frame edge | 4096 pixels |
 | `session_id` | 128 characters |
 | WebSocket text message | 65,536 characters |
+| WebSocket observations outstanding | 8 |
+| `observation_id` | 128 characters |
 | Idle session | 60 seconds |
 | Buffered stream connection | 30 minutes |
 | `max_output_tokens` | 65,536 |
 | `Idempotency-Key` | 200 characters |
+| Robot run file in one request, or one part | 64 MiB |
+| Robot run | 2 GiB, 2,000 files |
+| Robot runs per account | 100 GiB |

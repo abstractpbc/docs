@@ -1,6 +1,7 @@
 ---
 title: "Sessions over WebSocket"
 description: "One socket runs one episode: frames and observations go up, action chunks come back."
+icon: "plug-zap"
 ---
 
 The WebSocket at `/v1/responses` runs one episode per socket.
@@ -38,12 +39,27 @@ You send text messages as JSON, and frames as binary messages.
 | --- | --- | --- |
 | Open | `{"type":"session.open","model":"...","instruction":"...","session_id":"optional"}` | `session.opened` |
 | Frame | Binary: one byte with the camera index, then the JPEG bytes | Nothing |
-| Observation | `{"type":"observation","robot_state":{...}}` | `actions` |
+| Observation | `{"type":"observation","observation_id":"optional-id","robot_state":{...}}` | `actions` |
 | Close | `{"type":"session.close"}` | `session.closed`, then close code 1000 |
 
 `session.open` also takes `handoff`, as in [Handoff](/robots/handoff).
 `observation` also takes `action_horizon` and `num_inference_steps`, as on chat completions.
 A text message is at most 65,536 characters.
+
+`observation_id` is optional: use 1 to 128 characters from `A-Z a-z 0-9 . _ : -`.
+The API generates one if omitted and returns it on that observation's `actions` or
+`error` message. Use a fresh id per logical observation, and reuse it with identical
+frames and controls when retrying. Supply `expected_step`, starting at zero, to reject
+out-of-order observations. A repeated completed id returns its original answer with no
+new execution or charge; different content conflicts. Concurrent duplicates share the
+outstanding observation's answer. Generated ids cannot protect retries after a lost reply.
+
+Replay records have no expiry and survive gateway and engine restarts. Keep the same
+public `session_id` and opening message when retrieving an answer on a new connection.
+A stored answer does not restore the model's lost episode. If an answer was never saved,
+`observation_outcome_unknown` refuses re-execution; do not switch to a new id to bypass it.
+Each connection admits at most 1,024 observation ids and buffers at most 16 MiB of frames;
+a retained answer must fit 4 MiB. See [HTTP retries](/robots/chat-completions#retrying-an-observation).
 
 ### session.opened
 
@@ -114,7 +130,20 @@ The answer to an observation carries the same action chunk as a chat completion,
 
 The example shows one action row and example numbers. A real answer holds `action_horizon` rows.
 An `abstract/dreamzero-astra:yam` answer also carries `cache` and `context`, as on [chat completions](/robots/chat-completions#answer).
-Send the next observation after the previous `actions` or `error` arrives.
+You can wait for each reply, or pipeline up to eight outstanding observations. Send all
+frames for A, then observation A, then all frames for B, then observation B. Give each
+observation its own id so you can match replies. The engine executes observations
+sequentially in arrival order; pipelining does not run them concurrently. Each observation
+has its own credit reservation and usage settlement. Socket ingress holds at most 16 MiB
+and 128 messages while earlier messages are processed; exceeding either limit closes
+the socket with `message_too_large`. Acknowledged observation ids remain protected by
+durable replay records, so a long episode does not need to restart after 1,024 observations.
+
+For stateful models, a failed observation does not advance the step. Later queued
+observations are validated against the step that actually exists, so a failure on the
+first observation can also make a queued continuation's frame count invalid. Waiting for
+each reply is simplest when recovering from errors. Your robot controller must decide
+which returned actions remain applicable to its current state.
 
 ### session.closed
 
@@ -141,15 +170,19 @@ An error arrives as a text message:
 
 | `closing` | Meaning | What to do |
 | --- | --- | --- |
-| `false` | The session is where it was. The server dropped the frames you sent since the last observation. | Fix the message. Send the frames and the observation again. |
+| `false` | The socket stays open. An observation error carries its `observation_id` and does not advance its step. | Fix the indicated observation and resend its frames under a new id. |
 | `true` | The server closes the socket next. | Open a new socket for a new episode. |
+
+Frame and session-control errors have no `observation_id` and are not terminal answers to
+other outstanding observations. Already queued observations can still return results.
+On a close, unanswered observations settle at zero; previously completed ones retain their usage.
 
 The close code tells you whose fault it was:
 
 | Close code | Meaning | Codes |
 | --- | --- | --- |
-| 1008 | The request cannot continue on this socket. | `session_busy`, `no_replica_free`, `session_expired`, `model_not_found`, `model_missing`, `spend_limit_exceeded`, `metering_unavailable` |
-| 1011 | The model or the server failed. | `model_failure` |
+| 1008 | The request cannot continue on this socket. | `session_busy`, `no_replica_free`, `session_expired`, `model_not_found`, `model_missing`, `spend_limit_exceeded`, `metering_unavailable`, `invalid_observation_id`, `observation_pending`, `too_many_observations`, `message_too_large` |
+| 1011 | The model or the server failed. | `model_failure`, `engine_protocol_error` |
 
 [Errors and limits](/errors) lists every code.
 

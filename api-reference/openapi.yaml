@@ -10,6 +10,11 @@ info:
 
     The robot models also run over a WebSocket at `wss://api.abstract.inc/v1/responses`.
     OpenAPI does not describe it. See [Sessions over WebSocket](/robots/sessions).
+
+    `/v1/robot/runs` stores your robot runs (episode logs, the Rerun recording with the
+    camera video) under your account, and lists, downloads and deletes them. Only the key's
+    account reaches its runs. An account stores up to 100 GiB of runs;
+    `GET /v1/robot/runs/usage` shows what it holds.
   contact:
     name: Abstract
     url: https://abstract.inc
@@ -19,6 +24,7 @@ security:
   - bearerAuth: []
 tags:
   - name: Robot models
+  - name: Robot runs
   - name: LLM models
 
 paths:
@@ -27,6 +33,20 @@ paths:
       tags: [Robot models]
       operationId: createActionChunk
       summary: Create an action chunk
+      x-mint:
+        metadata:
+          description: "Turns one observation into one action chunk."
+        content: |
+          The last user message carries the task instruction as a text part and the camera frames
+          as JPEG image parts, camera-major and oldest first within a camera. `robot_state`,
+          `session_id` and the controls are top-level fields.
+
+          The action chunk comes back as a JSON string in `choices[0].message.content`.
+
+          With `stream: true` the answer is `text/event-stream`: `: processing` comments every 250
+          ms, one event with the whole chunk, one event with `finish_reason` and `usage`, then
+          `data: [DONE]`. A failure after the stream starts arrives as an event with an `error`
+          object and `finish_reason: "error"`; the HTTP status stays 200.
       description: |
         Turns one observation into one action chunk. The last user message carries the task
         instruction as a text part and the camera frames as JPEG image parts, camera-major
@@ -225,6 +245,16 @@ paths:
       tags: [LLM models]
       operationId: createResponse
       summary: Create a response
+      x-mint:
+        metadata:
+          description: "The OpenAI Responses API for the LLM models."
+        content: |
+          An `:async` model answers at once with a `queued` or `in_progress` response; poll
+          `GET /v1/responses/{response_id}` until it is terminal. A `:superfast` model completes
+          inline.
+
+          `stream: true` returns server-sent events: live on `:superfast` models, buffered on
+          `:async` models (keep-alives while the job runs, then the whole output).
       description: |
         The OpenAI Responses API for the LLM models. An `:async` model answers at once with a
         `queued` or `in_progress` response; poll `GET /v1/responses/{response_id}` until it is
@@ -424,7 +454,637 @@ paths:
         '503':
           $ref: '#/components/responses/Unavailable'
 
+  /v1/robot/runs:
+    get:
+      tags: [Robot runs]
+      operationId: listRobotRuns
+      summary: List robot runs
+      description: Lists your completed runs by robot, then run name, oldest first. A run shows up once `complete` has accepted it. Page with `cursor`.
+      parameters:
+        - name: robot
+          in: query
+          required: false
+          description: Only this robot's runs.
+          schema: { type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+        - name: cursor
+          in: query
+          required: false
+          description: The `cursor` of the previous page.
+          schema: { type: string }
+      responses:
+        '200':
+          description: One page of runs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RobotRunList'
+              example:
+                runs:
+                  - robot: t800
+                    run: 20261012-053736
+                    files: 9
+                    bytes: 9349120
+                    completed_at: '2026-10-12T05:40:12.000Z'
+                    episode: { outcome: partial, policy: isaac-0.5, kind: vla, task: fold-the-cloth, tags: [cloth] }
+                cursor: null
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/robot/runs/usage:
+    get:
+      tags: [Robot runs]
+      operationId: getRobotRunsUsage
+      summary: Robot runs usage
+      description: What your account's runs hold against its quota, and this month's metering. Storage is measured over time in GiB-months of 730 hours. Runs are metered, not charged.
+      responses:
+        '200':
+          description: The account's usage.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RobotRunsUsage'
+              example:
+                bytes: 9349120
+                files: 9
+                quota_bytes: 107374182400
+                reserved_bytes: 0
+                month: '2026-10'
+                stored_gib_months: 0.000412
+                peak_bytes: 9349120
+                uploaded_bytes: 9349120
+                writes: 9
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/robot/runs/{robot}/{run}:
+    get:
+      tags: [Robot runs]
+      operationId: getRobotRun
+      summary: Get a robot run
+      description: Returns a completed run's manifest. Each file's `path`, `size` and `sha256`, and the episode card it was completed with.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+      responses:
+        '200':
+          description: The run's manifest.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RobotRunManifest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`run_not_found`: no completed run by that name in your account.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Robot runs]
+      operationId: deleteRobotRun
+      summary: Delete a robot run
+      description: Deletes every file of the run, completed or not. Deleting a run that does not exist deletes nothing.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+      responses:
+        '200':
+          description: How many files were deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/robot/runs/{robot}/{run}/complete:
+    post:
+      tags: [Robot runs]
+      operationId: completeRobotRun
+      summary: Complete a robot run
+      x-mint:
+        metadata:
+          description: "Lists every file of the run."
+        content: |
+          The run completes only when each listed file is stored with that size and nothing else
+          is stored under it. Then the run is listed. Any later upload or file deletion takes it
+          out of the listing until you complete it again.
+      description: Lists every file of the run. The run completes only when each listed file is stored with that size and nothing else is stored under it. Then the run is listed. Any later upload or file deletion takes it out of the listing until you complete it again.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  minItems: 1
+                  maxItems: 2000
+                  items:
+                    $ref: '#/components/schemas/RobotRunFile'
+                episode:
+                  type: object
+                  description: The run's episode card, at most 64 KiB of JSON. Listings carry its `run`, `outcome`, `policy`, `kind`, `verdict`, `steps`, `duration_s`, `started_at`, `task` and `tags`.
+      responses:
+        '200':
+          description: The run is complete.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [robot, run, files, bytes, completed_at]
+                properties:
+                  robot: { type: string }
+                  run: { type: string }
+                  files: { type: integer }
+                  bytes: { type: integer }
+                  completed_at: { type: string, format: date-time }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: '`run_incomplete`: a listed file is missing or has another size, or a stored file is not listed. The message names them.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`request_too_large`: the body is over 1 MiB.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/robot/runs/{robot}/{run}/files/{path}:
+    put:
+      tags: [Robot runs]
+      operationId: uploadRobotRunFile
+      summary: Upload a run file
+      description: Stores one file of at most 64 MiB; a larger one goes up in parts (`/uploads/`). The body must match `X-Content-SHA256`. Putting a path again replaces the file.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+        - name: X-Content-SHA256
+          in: header
+          required: true
+          description: The body's SHA-256, 64 hex digits.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201':
+          description: The file is stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RobotRunFile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '411':
+          description: '`length_required`: the request has no Content-Length.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`request_too_large` (over 64 MiB), `run_too_large` (over 2 GiB or 2,000 files in the run) or `storage_quota_exceeded` (the account would hold more than its quota).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`checksum_mismatch`: the body is not the SHA-256 sent; or `invalid_request`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags: [Robot runs]
+      operationId: downloadRobotRunFile
+      summary: Download a run file
+      description: Returns the file's bytes, with its SHA-256 in `X-Content-SHA256`. Send `Range` for part of it. `HEAD` returns the same headers without the body.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '200':
+          description: The file.
+          headers:
+            X-Content-SHA256:
+              description: The SHA-256 the file was uploaded with.
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '206':
+          description: The requested range.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`file_not_found`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '416':
+          description: '`invalid_range`: the Range cannot be served.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Robot runs]
+      operationId: deleteRobotRunFile
+      summary: Delete a run file
+      description: Deletes one file. The run leaves the listing until you complete it again.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`file_not_found`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/robot/runs/{robot}/{run}/uploads/{path}:
+    get:
+      tags: [Robot runs]
+      operationId: getRobotRunUpload
+      summary: Resume a multipart upload
+      description: Returns its state and acknowledged parts. Resume missing parts while uploading; retry completion while assembling or publishing. A completed receipt is returned only while that file version is still stored.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+        - name: upload_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Current upload state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state: { type: string, enum: [uploading, assembling, publishing, complete] }
+                  size: { type: integer }
+                  sha256: { type: string }
+                  parts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        part: { type: integer }
+                        etag: { type: string }
+                        size: { type: integer }
+        '404':
+          description: Upload expired, was aborted, or its completed file was replaced.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Robot runs]
+      operationId: startOrFinishRobotRunUpload
+      summary: Start or finish a multipart upload
+      x-mint:
+        metadata:
+          description: "Without `upload_id`, starts an upload of a file larger than 64 MiB."
+        content: |
+          Send its SHA-256 in `X-Content-SHA256` and its total byte length in `X-Content-Length`;
+          the answer is the `upload_id`. Older clients may omit the total length; their parts
+          reserve quota cumulatively. With `upload_id`, finishes it: the body lists the parts and
+          the file's size, and the assembled file must match that size and SHA-256. Repeating the
+          same start or completion is safe after a lost response. Keep the upload ID and query its
+          status to resume. At most 16 unfinished uploads belong to one run; uploads idle for 24
+          hours are aborted and their quota released. Publication temporarily keeps both the
+          staging object and the replacement: leave room for one additional file copy. A quota
+          refusal preserves the upload so you can free room and retry, or DELETE the upload to
+          release its reservation.
+      description: |
+        Without `upload_id`, starts an upload of a file larger than 64 MiB. Send its SHA-256
+        in `X-Content-SHA256` and its total byte length in `X-Content-Length`; the answer is
+        the `upload_id`. Older clients may omit the total length; their parts reserve
+        quota cumulatively. With `upload_id`, finishes it: the body lists the parts and
+        the file's size, and the assembled file must match that size and SHA-256.
+        Repeating the same start or completion is safe after a lost response. Keep the
+        upload ID and query its status to resume. At most 16 unfinished uploads belong
+        to one run; uploads idle for 24 hours are aborted and their quota released.
+        Publication temporarily keeps both the staging object and the replacement:
+        leave room for one additional file copy. A quota refusal preserves the upload
+        so you can free room and retry, or DELETE the upload to release its reservation.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+        - name: upload_id
+          in: query
+          required: false
+          schema: { type: string }
+        - name: X-Content-SHA256
+          in: header
+          required: false
+          description: Required to start. The whole file's SHA-256, 64 hex digits.
+          schema: { type: string, pattern: '^[0-9a-f]{64}$' }
+        - name: X-Content-Length
+          in: header
+          required: false
+          description: Recommended at start. Reserves the whole file's byte length before accepting parts.
+          schema: { type: integer, minimum: 0, maximum: 2147483648 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [parts, size]
+              properties:
+                parts:
+                  type: array
+                  items:
+                    type: object
+                    required: [part, etag]
+                    properties:
+                      part: { type: integer }
+                      etag: { type: string }
+                size: { type: integer }
+      responses:
+        '201':
+          description: Started (`upload_id`), or finished (`path`, `size`, `sha256`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    required: [upload_id]
+                    properties:
+                      upload_id: { type: string }
+                  - $ref: '#/components/schemas/RobotRunFile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`upload_not_found`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`run_too_large`, `request_too_large` or `storage_quota_exceeded`. A quota refusal keeps the staged upload for retry or explicit abort.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`checksum_mismatch`: the assembled file is not the size and SHA-256 it started with, and is discarded; or `invalid_request`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      tags: [Robot runs]
+      operationId: uploadRobotRunPart
+      summary: Upload a part
+      description: Uploads part `part` of a multipart upload. Every part but the last is at least 5 MiB; each is at most 64 MiB.
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+        - name: upload_id
+          in: query
+          required: true
+          schema: { type: string }
+        - name: part
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 10000 }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: The part is stored. Keep its `etag` to finish the upload.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [part, etag]
+                properties:
+                  part: { type: integer }
+                  etag: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`upload_not_found`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '411':
+          description: '`length_required`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`request_too_large`, or `storage_quota_exceeded` when all staged parts and other held uploads would pass the quota.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags: [Robot runs]
+      operationId: abortRobotRunUpload
+      summary: Abort a multipart upload
+      parameters:
+        - $ref: '#/components/parameters/Robot'
+        - $ref: '#/components/parameters/Run'
+        - $ref: '#/components/parameters/FilePath'
+        - name: upload_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Aborted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: '`upload_not_found`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`invalid_request`: a name, path, query or body breaks its format.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: '`storage_unavailable` or `auth_unavailable`. Retry with backoff.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
 components:
+  parameters:
+    Robot:
+      name: robot
+      in: path
+      required: true
+      description: Your robot's name, for example `t800`.
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$' }
+    Run:
+      name: run
+      in: path
+      required: true
+      description: The run's name, its start time as `YYYYMMDD-HHMMSS`.
+      schema: { type: string, pattern: '^\d{8}-\d{6}$' }
+    FilePath:
+      name: path
+      in: path
+      required: true
+      description: The file's path in the run. It may hold `/`; up to 8 segments of letters, digits, `.`, `_` and `-`, each starting with a letter or digit, 512 bytes in all. `manifest.json` at the top is the server's.
+      schema: { type: string }
+
   securitySchemes:
     bearerAuth:
       type: http
@@ -476,7 +1136,7 @@ components:
       properties:
         model:
           type: string
-          enum: [abstract/dreamzero-astra:yam, stealth/picasso:yam, allenai/molmoact2:yam, microsoft/rho:yam]
+          enum: [abstract/dreamzero-astra:yam, stealth/picasso:yam, allenai/molmoact2:yam, microsoft/rho:yam, perceptron/isaac-0.5:yam, physical-intelligence/pi0.5:yam]
           description: A robot model id.
         messages:
           type: array
@@ -493,6 +1153,14 @@ components:
           type: string
           maxLength: 128
           description: The episode id you choose. Required with image parts on `abstract/dreamzero-astra:yam` and `stealth/picasso:yam`; optional on the others. A new value starts a new episode.
+        observation_id:
+          type: string
+          pattern: '^[A-Za-z0-9._:-]{1,128}$'
+          description: Logical observation identity. Reuse with an identical body to replay the original result without another execution or charge.
+        expected_step:
+          type: integer
+          minimum: 0
+          description: Expected next session step. A mismatch returns 409 without inference.
         stream:
           type: boolean
           default: false
@@ -796,6 +1464,59 @@ components:
                   streaming_mode:
                     type: string
                     enum: [buffered, live]
+
+    RobotRunFile:
+      type: object
+      required: [path, size, sha256]
+      properties:
+        path: { type: string }
+        size: { type: integer }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+
+    RobotRunManifest:
+      type: object
+      required: [robot, run, files, episode, completed_at]
+      properties:
+        robot: { type: string }
+        run: { type: string }
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/RobotRunFile'
+        episode: { type: object }
+        completed_at: { type: string, format: date-time }
+
+    RobotRunsUsage:
+      type: object
+      required: [bytes, files, quota_bytes, month, stored_gib_months, peak_bytes, uploaded_bytes, writes]
+      properties:
+        bytes: { type: integer, description: Bytes your runs' files hold now. }
+        files: { type: integer, description: Files your runs hold now. }
+        quota_bytes: { type: integer, description: The most your account's runs may hold. }
+        reserved_bytes: { type: integer, description: Quota held for unfinished uploads and temporary publication copies. }
+        month: { type: string, description: 'The calendar month (UTC) the next four figures cover, as YYYY-MM.' }
+        stored_gib_months: { type: number, description: Storage held over the month so far, in GiB-months of 730 hours. }
+        peak_bytes: { type: integer, description: The most your runs held this month. }
+        uploaded_bytes: { type: integer, description: Bytes uploaded this month, replaced files included. }
+        writes: { type: integer, description: Files uploaded this month. }
+
+    RobotRunList:
+      type: object
+      required: [runs, cursor]
+      properties:
+        runs:
+          type: array
+          items:
+            type: object
+            required: [robot, run, files, bytes, completed_at, episode]
+            properties:
+              robot: { type: string }
+              run: { type: string }
+              files: { type: integer }
+              bytes: { type: integer }
+              completed_at: { type: string, format: date-time }
+              episode: { type: object }
+        cursor: { type: [string, 'null'] }
 
     ErrorResponse:
       type: object

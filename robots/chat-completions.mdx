@@ -1,6 +1,7 @@
 ---
 title: "Chat completions"
 description: "One HTTP request turns one observation into one action chunk."
+icon: "message-square-code"
 ---
 
 `POST https://api.abstract.inc/v1/chat/completions` takes one observation and returns one action chunk.
@@ -30,18 +31,54 @@ The chunk comes back as a JSON string in the assistant message.
 }
 ```
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `model` | string | A robot model id from [Robot models](/robots/models). Required. |
-| `messages` | array | The server reads the last user message only. Required. |
-| `robot_state` | object | The robot's state at the time of the latest frame. Required with image parts. Its shape depends on the model. |
-| `session_id` | string | The episode id you choose. Required with image parts on a stateful model. Optional otherwise. At most 128 printable characters, no surrounding whitespace. |
-| `stream` | boolean | `true` returns server-sent events. Default `false`. |
-| `action_horizon` | integer | How many action rows to return, from 1 to the model's rows per chunk. Default: all rows. |
-| `num_inference_steps` | integer | From 1 to 4. Accepted for compatibility. No served model reads it. |
-| `handoff` | boolean | `true` is refused today with `handoff_unavailable`. See [Handoff](/robots/handoff). Default `false`. |
+<ResponseField name="model" type="string" required>
+  A robot model id from [Robot models](/robots/models).
+</ResponseField>
+<ResponseField name="messages" type="array" required>
+  The server reads the last user message only.
+</ResponseField>
+<ResponseField name="robot_state" type="object">
+  The robot's state at the time of the latest frame. Required with image parts. Its shape depends on the model.
+</ResponseField>
+<ResponseField name="session_id" type="string">
+  The episode id you choose. Required with image parts on a stateful model. Optional otherwise. At most 128 printable characters, no surrounding whitespace.
+</ResponseField>
+<ResponseField name="observation_id" type="string">
+  Unique logical observation id, 1–128 characters from `A-Z a-z 0-9 . _ : -`. Reuse only for an identical retry.
+</ResponseField>
+<ResponseField name="expected_step" type="integer">
+  Expected next session step, starting at zero. A mismatch returns 409 without inference.
+</ResponseField>
+<ResponseField name="stream" type="boolean">
+  `true` returns server-sent events. Default `false`.
+</ResponseField>
+<ResponseField name="action_horizon" type="integer">
+  How many action rows to return, from 1 to the model's rows per chunk. Default: all rows.
+</ResponseField>
+<ResponseField name="num_inference_steps" type="integer">
+  From 1 to 4. Accepted for compatibility. No served model reads it.
+</ResponseField>
+<ResponseField name="handoff" type="boolean">
+  `true` is refused today with `handoff_unavailable`. See [Handoff](/robots/handoff). Default `false`.
+</ResponseField>
 
 The server ignores other fields.
+
+### Retrying an observation
+
+Send `observation_id` and `expected_step` with each observation. Keep the id and body
+byte-for-byte identical when retrying a lost response. `Idempotency-Key` can replace
+`observation_id`; if both are supplied they must match. Reusing an id with different
+content returns `409 idempotency_conflict`. A completed retry returns the original
+result and does not execute or bill another chunk. Keyed SSE is returned after the
+complete reply is retained; unkeyed streaming is unchanged.
+
+Replay records currently have no expiry and survive gateway and engine restarts.
+If execution is still pending, or the answer could not be saved (including the 4 MiB
+retained-response limit), another gateway may return `observation_outcome_unknown`.
+Retry only the same id. Changing the id may execute an observation twice. A replayed
+answer does not restore an expired model session. Requests without an id are not safe
+to retry automatically.
 
 ### The last user message
 
@@ -98,18 +135,36 @@ The last frame of each camera is the latest one.
 The example shows one action row. A real answer holds `action_horizon` rows.
 Parse `choices[0].message.content` as JSON to get the action chunk:
 
-| Field | Meaning |
-| --- | --- |
-| `session_id` | The session this chunk belongs to. A request without `session_id` gets a generated id. |
-| `step` | The chunk's zero-based index in the session. |
-| `dt` | Seconds between consecutive action rows. |
-| `action_dim` | Values per action row. |
-| `action_space` | `joint_position` or `ee_6d_position`. See [Robot models](/robots/models). |
-| `actions` | `action_horizon` rows of `action_dim` numbers. |
-| `next_frames_per_camera` | Frames per camera the next request of this session needs. |
-| `timing_ms` | Server-side durations in milliseconds: `decode`, `queue`, `prefill`, `denoise`, `encode`. |
-| `cache` | Present when the model reports its denoiser step cache for this chunk. |
-| `context` | Present when the model reports its attention context after this chunk. |
+<ResponseField name="session_id" type="string">
+  The session this chunk belongs to. A request without `session_id` gets a generated id.
+</ResponseField>
+<ResponseField name="step" type="integer">
+  The chunk's zero-based index in the session.
+</ResponseField>
+<ResponseField name="dt" type="number">
+  Seconds between consecutive action rows.
+</ResponseField>
+<ResponseField name="action_dim" type="integer">
+  Values per action row.
+</ResponseField>
+<ResponseField name="action_space" type="string">
+  `joint_position` or `ee_6d_position`. See [Robot models](/robots/models).
+</ResponseField>
+<ResponseField name="actions" type="number[][]">
+  `action_horizon` rows of `action_dim` numbers.
+</ResponseField>
+<ResponseField name="next_frames_per_camera" type="integer">
+  Frames per camera the next request of this session needs.
+</ResponseField>
+<ResponseField name="timing_ms" type="object">
+  Server-side durations in milliseconds: `decode`, `queue`, `prefill`, `denoise`, `encode`.
+</ResponseField>
+<ResponseField name="cache" type="object">
+  Present when the model reports its denoiser step cache for this chunk.
+</ResponseField>
+<ResponseField name="context" type="object">
+  Present when the model reports its attention context after this chunk.
+</ResponseField>
 
 `usage` is what the chunk is billed from.
 See [Usage and billing units](/robots/usage).

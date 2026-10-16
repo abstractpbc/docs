@@ -1,6 +1,7 @@
 ---
 title: "Usage and billing units"
 description: "What a robot chunk is billed from: prompt tokens, cached tokens, and actions."
+icon: "receipt"
 ---
 
 Every action chunk carries a `usage` object.
@@ -32,6 +33,8 @@ A smaller `action_horizon` returns fewer rows but does not lower `completion_tok
 | `stealth/picasso:yam` | 24 | The part of the episode's attention window reused from earlier chunks |
 | `allenai/molmoact2:yam` | 30 | 0 |
 | `microsoft/rho:yam` | 25 | 0 |
+| `perceptron/isaac-0.5:yam` | 30 | 0 |
+| `physical-intelligence/pi0.5:yam` | 30 | 0 |
 
 Picasso costs $0.40 per million input tokens, $0.005 per million cached input tokens, and $0.25 per million actions. These rates apply to both chat completions and WebSocket observations.
 

@@ -1,6 +1,7 @@
 ---
 title: "Responses API"
 description: "Call the LLM models with the OpenAI Responses API: submit and poll, or stream."
+icon: "sparkles"
 ---
 
 The LLM models speak the OpenAI Responses API at `POST https://api.abstract.inc/v1/responses`.
@@ -27,14 +28,27 @@ curl -s https://api.abstract.inc/v1/responses \
   -d '{"model":"glm-5.3:async","input":"Summarise RFC 8628 in three sentences."}'
 ```
 
-| Field | Rule |
-| --- | --- |
-| `model` | One of the ids above. Required. |
-| `input` | The OpenAI Responses `input`. |
-| `stream` | `true` returns server-sent events. Live on `:superfast`, buffered on `:async`. |
-| `max_output_tokens` | A positive integer, at most 65,536. Default 8,192 on `glm-5.3:superfast` and 4,096 on the others. |
-| `previous_response_id` | Not supported on any model. |
-| `background`, `store` | `true` is not supported on a `:superfast` model. |
+<ResponseField name="model" type="string" required>
+  One of the ids above.
+</ResponseField>
+<ResponseField name="input" type="string | array">
+  The OpenAI Responses `input`.
+</ResponseField>
+<ResponseField name="stream" type="boolean">
+  `true` returns server-sent events. Live on `:superfast`, buffered on `:async`.
+</ResponseField>
+<ResponseField name="max_output_tokens" type="integer">
+  A positive integer, at most 65,536. Default 8,192 on `glm-5.3:superfast` and 4,096 on the others.
+</ResponseField>
+<ResponseField name="previous_response_id" type="string">
+  Not supported on any model.
+</ResponseField>
+<ResponseField name="background" type="boolean">
+  `true` is not supported on a `:superfast` model.
+</ResponseField>
+<ResponseField name="store" type="boolean">
+  `true` is not supported on a `:superfast` model.
+</ResponseField>
 
 The API refuses an unsupported field with HTTP 422 `invalid_request` before it reserves any cost.
 The request body is at most 2 MiB.
@@ -89,6 +103,7 @@ Send a key whenever a client can retry, so a retry never starts a second job.
 
 Set the base URL to `https://api.abstract.inc/v1` and read the key from `ABSTRACT_API_KEY`.
 
+<CodeGroup>
 ```python async_poll.py
 import os
 import time
@@ -110,6 +125,28 @@ print(response.status)
 print(response.output_text)
 ```
 
+```typescript async_poll.ts
+import OpenAI from "openai"
+
+const client = new OpenAI({
+  baseURL: "https://api.abstract.inc/v1",
+  apiKey: process.env.ABSTRACT_API_KEY,
+})
+
+let response = await client.responses.create(
+  { model: "glm-5.3:async", input: "Summarise RFC 8628 in three sentences." },
+  { headers: { "Idempotency-Key": crypto.randomUUID() } },
+)
+while (response.status === "queued" || response.status === "in_progress") {
+  await new Promise((resolve) => setTimeout(resolve, 10_000))
+  response = await client.responses.retrieve(response.id)
+}
+console.log(response.status)
+console.log(response.output_text)
+```
+</CodeGroup>
+
+<CodeGroup>
 ```python superfast_stream.py
 import os
 import uuid
@@ -130,7 +167,26 @@ for event in stream:
 print()
 ```
 
-Run either with `ABSTRACT_API_KEY="$(abstract token)" python async_poll.py`.
+```typescript superfast_stream.ts
+import OpenAI from "openai"
+
+const client = new OpenAI({
+  baseURL: "https://api.abstract.inc/v1",
+  apiKey: process.env.ABSTRACT_API_KEY,
+})
+
+const stream = await client.responses.create(
+  { model: "kimi-k3:superfast", input: "Write a haiku about a robot arm.", stream: true },
+  { headers: { "Idempotency-Key": crypto.randomUUID() } },
+)
+for await (const event of stream) {
+  if (event.type === "response.output_text.delta") process.stdout.write(event.delta)
+}
+process.stdout.write("\n")
+```
+</CodeGroup>
+
+Run a program with the key in its environment only, for example `ABSTRACT_API_KEY="$(abstract token)" python async_poll.py`.
 
 ## Usage
 
