@@ -29,34 +29,22 @@ Call a robot model with `POST /v1/chat/completions`, one observation per request
 
 <Columns cols={2}>
   <Card title="DreamZero-Astra" icon="bot" href="/robots/models#abstract/dreamzero-astrayam">
-    `abstract/dreamzero-astra:yam`
-
-    A DreamZero world action model. Keeps the episode's context on the server.
+    `abstract/dreamzero-astra`
   </Card>
   <Card title="Picasso" icon="bot" href="/robots/models#stealth/picassoyam">
-    `stealth/picasso:yam`
-
-    Keeps the episode's context on the server.
+    `stealth/picasso`
   </Card>
   <Card title="MolmoAct2" icon="bot" href="/robots/models#allenai/molmoact2yam">
-    `allenai/molmoact2:yam`
-
-    Ai2's MolmoAct2. One frame per camera, no state between requests.
+    `allenai/molmoact2`
   </Card>
   <Card title="Rho" icon="bot" href="/robots/models#microsoft/rhoyam">
-    `microsoft/rho:yam`
-
-    Microsoft's Rho-YAM-Box. Predicts Cartesian end-effector targets.
+    `microsoft/rho`
   </Card>
   <Card title="Isaac 0.5" icon="bot" href="/robots/models#perceptron/isaac-0-5yam">
-    `perceptron/isaac-0.5:yam`
-
-    Perceptron's Isaac 0.5. One frame per camera, no state between requests.
+    `perceptron/isaac-0.5`
   </Card>
   <Card title="π0.5" icon="bot" href="/robots/models#physical-intelligence/pi0-5yam">
-    `physical-intelligence/pi0.5:yam`
-
-    A community fine-tune of π0.5. One frame per camera, no state between requests.
+    `physical-intelligence/pi0.5`
   </Card>
 </Columns>
 
@@ -64,7 +52,7 @@ A robot model id has the form `origin/model:embodiment`.
 `origin` names who made the weights.
 `model` names the weights.
 `embodiment` names the robot they drive.
-Every served robot model drives a bimanual YAM: two YAM arms, one scene camera, and one camera on each wrist.
+Every base served robot model drives a bimanual YAM: two YAM arms, one scene camera, and one camera on each wrist.
 
 <Warning>
 Abstract returns numbers. It does not move your robot.
@@ -73,26 +61,10 @@ Check every action against your robot's limits before you execute it.
 
 ## LLMs
 
-The LLMs speak the OpenAI Responses API at `POST /v1/responses`.
-An LLM model id has the form `family-version:profile`.
-The part before the colon names the weights.
-The part after the colon names the API contract.
-
-| Profile | Contract | Model ids |
-| --- | --- | --- |
-| `:async` | The request runs in the background. You poll for the result. | `glm-5.3:async`<br />`deepseek-v4-flash:async` |
-| `:superfast` | The request completes inline. Streaming is live. | `glm-5.3:superfast`<br />`deepseek-v4-flash:superfast`<br />`kimi-k3:superfast` |
-
-## Accounts and spend
-
-Every account has a hard monthly spend limit.
-Each request reserves its maximum cost against that limit before it runs.
-The request then settles from the usage its answer reports.
-A request that would cross the limit is refused with `spend_limit_exceeded`.
-API keys work for inference only after the account has a payment method or credit.
+The LLMs speak the OpenAI completions API at `POST /v1/chat/completions`.
 
 <Note>
-Do not send sensitive data until retention controls and their defaults are documented.
+
 </Note>
 
 ## Explore
@@ -104,7 +76,7 @@ Do not send sensitive data until retention controls and their defaults are docum
   <Card title="Sessions over WebSocket" icon="plug-zap" href="/robots/sessions">
     Run one episode on one socket.
   </Card>
-  <Card title="Responses API" icon="sparkles" href="/llm/responses">
+  <Card title="completions API" icon="sparkles" href="/llm/responses">
     Call the LLM models with the OpenAI SDK.
   </Card>
   <Card title="Errors and limits" icon="triangle-alert" href="/errors">
